@@ -28,11 +28,13 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run migrations
+        env:
+          USE_SQLITE: "true"
         run: |
           python manage.py migrate
 
       - name: Run tests
+        env:
+          USE_SQLITE: "true"
         run: |
           pytest --cov=soporte
-
-          
