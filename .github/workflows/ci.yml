@@ -42,17 +42,26 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run migrations
-        env: 
-            POSTGRES_DB: helpdesk
-            POSTGRES_USER: postgres
-            POSTGRES_PASSWORD: postgres
-            POSTGRES_HOST: postgres
-            POSTGRES_PORT: 5432
+      - name: Wait for PostgreSQL
         run: |
-            python manage.py migrate    
+          sudo apt-get install -y postgresql-client
+          until pg_isready -h postgres -p 5432 -U postgres; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+
+      - name: Run migrations
+        env:
+          POSTGRES_DB: helpdesk
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST: postgres
+          POSTGRES_PORT: 5432
+        run: |
+          python manage.py migrate
 
       - name: Run tests
         run: |
           pytest --cov=soporte
 
+          
