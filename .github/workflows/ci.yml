@@ -37,5 +37,5 @@ jobs:
         env:
           USE_SQLITE: "true"
         run: |
-          pytest --cov=soporte --cov-fail-under=80
+          pytest --cov=soporte --cov-fail-under=100
     
