@@ -5,5 +5,9 @@ pytest
 pytest-django
 pytest-cov
 gunicorn
+python-dotenv
+requests
+django-cors-headers
+drf-spectacular
 
 
