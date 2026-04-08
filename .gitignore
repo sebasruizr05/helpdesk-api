@@ -12,8 +12,11 @@ db.sqlite3
 # VS Code
 .vscode/
 
-# Env vars
+# Env vars - NUNCA subir archivos con contraseñas o secrets
 .env
+.env.local
+.env.staging
+.env.production
 
 # Tests/Coverage
 .coverage
