@@ -1,7 +1,41 @@
-venv/
+# Git - No incluir archivos de control de versiones
 .git/
+.gitignore
+.github/
+
+# Python - No incluir archivos compilados ni entornos virtuales
+venv/
+env/
+.venv
 __pycache__/
 *.pyc
-db.sqlite3
-.env
+*.pyo
+*.pyd
+*.egg-info/
 
+# Tests y Coverage - No incluir en imagen de producción
+.pytest_cache
+.coverage
+htmlcov/
+
+# IDE - No incluir configuración de editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Base de datos local
+db.sqlite3
+
+# Environment files - No incluir archivos con secretos
+.env
+.env.local
+.env.staging
+.env.production
+
+# Documentación
+README.md
+*.md
+
+# Logs
+*.log
