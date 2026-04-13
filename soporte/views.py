@@ -17,7 +17,8 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
-
+from django.db.models.deletion import ProtectedError
+from rest_framework.exceptions import ValidationError
 
 # ============ V1 VIEWSETS - VERSIÓN ORIGINAL ============
 # Estos viewsets manejan las solicitudes HTTP de la API v1.
@@ -84,6 +85,25 @@ class SolicitanteViewSetV2(viewsets.ModelViewSet):
         inactivos = self.queryset.filter(estado='inactivo')
         serializer = self.get_serializer(inactivos, many=True)
         return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """Maneja eliminación con validación de integridad referencial."""
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError as e:
+            # Obtiene los tickets asociados al solicitante
+            instance = self.get_object()
+            tickets_asociados = instance.tickets.all()
+            return Response(
+                {
+                    'error': 'No se puede eliminar el solicitante porque tiene tickets asociados',
+                    'detalles': {
+                        'cantidad_tickets': tickets_asociados.count(),
+                        'tickets': [{'id': t.id, 'asunto': t.asunto} for t in tickets_asociados]
+                    }
+                },
+                status=status.HTTP_409_CONFLICT
+            )
 
 
 class TicketViewSetV2(viewsets.ModelViewSet):
