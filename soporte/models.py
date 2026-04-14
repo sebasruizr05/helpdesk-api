@@ -69,3 +69,33 @@ class Comentario(models.Model):
         return f"Comentario #{self.id} - Ticket #{self.ticket.id}"
 
 
+class IntegracionEvento(models.Model):
+    DIRECCIONES = [
+        ("entrada", "entrada"),
+        ("salida", "salida"),
+    ]
+
+    ESTADOS = [
+        ("pendiente", "pendiente"),
+        ("exitoso", "exitoso"),
+        ("fallido", "fallido"),
+    ]
+
+    trace_id = models.CharField(max_length=120, db_index=True)
+    direccion = models.CharField(max_length=20, choices=DIRECCIONES)
+    sistema_origen = models.CharField(max_length=120, default="unknown")
+    sistema_destino = models.CharField(max_length=120, null=True, blank=True)
+    endpoint = models.CharField(max_length=255)
+    metodo = models.CharField(max_length=10, default="POST")
+    request_json = models.JSONField(default=dict)
+    response_json = models.JSONField(null=True, blank=True)
+    status_code = models.IntegerField(null=True, blank=True)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
+    error = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.direccion.upper()} - {self.trace_id} - {self.estado}"
+
+

@@ -17,6 +17,7 @@ from soporte.views import (
     SolicitanteViewSetV2,
     TicketViewSetV2,
     ComentarioViewSetV2,
+    IntegracionIngresoAPIView,
 )
 
 # ============ V1 ROUTER ============
@@ -40,6 +41,7 @@ urlpatterns = [
     
     # API v2 (Mejorada)
     path("api/v2/", include(router_v2.urls)),
+    path("api/v2/integraciones/ingreso/", IntegracionIngresoAPIView.as_view(), name="integracion-ingreso"),
     
     # Documentación OpenAPI (Swagger)
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
@@ -49,4 +51,3 @@ urlpatterns = [
     # DRF Auth
     path("api-auth/", include("rest_framework.urls")),
 ]
-

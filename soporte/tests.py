@@ -1,7 +1,6 @@
 import pytest
-from django.urls import reverse
 from rest_framework.test import APIClient
-from soporte.models import Solicitante
+from soporte.models import Solicitante, Ticket, IntegracionEvento
 
 
 @pytest.mark.django_db
@@ -28,7 +27,7 @@ def test_listar_solicitantes_api():
         estado="activo"
     )
 
-    response = client.get("/api/solicitantes/")
+    response = client.get("/api/v1/solicitantes/")
 
     assert response.status_code == 200
     assert len(response.data) >= 1
@@ -45,7 +44,7 @@ def test_crear_solicitante_api():
         "estado": "activo"
     }
 
-    response = client.post("/api/solicitantes/", data)
+    response = client.post("/api/v1/solicitantes/", data)
 
     assert response.status_code == 201
 
@@ -72,7 +71,7 @@ def test_crear_solicitante_sin_email():
         "estado": "activo"
     }
 
-    response = client.post("/api/solicitantes/", data)
+    response = client.post("/api/v1/solicitantes/", data)
 
     assert response.status_code == 400
 
@@ -94,7 +93,7 @@ def test_buscar_solicitante():
 def test_lista_solicitantes_vacia():
     client = APIClient()
 
-    response = client.get("/api/solicitantes/")
+    response = client.get("/api/v1/solicitantes/")
 
     assert response.status_code == 200
 
@@ -110,7 +109,43 @@ def test_eliminar_solicitante():
         estado="activo"
     )
 
-    response = client.delete(f"/api/solicitantes/{solicitante.id}/")
+    response = client.delete(f"/api/v1/solicitantes/{solicitante.id}/")
 
     assert response.status_code == 204
+
+
+@pytest.mark.django_db
+def test_integracion_ingreso_payload_desconocido():
+    client = APIClient()
+
+    response = client.post("/api/v2/integraciones/ingreso/", {"foo": "bar"}, format="json")
+
+    assert response.status_code == 202
+    assert response.data["normalizado"] is False
+    assert IntegracionEvento.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_integracion_ingreso_crea_ticket_si_mapea():
+    client = APIClient()
+    payload = {
+        "source_system": "nube-a",
+        "payload": {
+            "solicitante": {
+                "nombre": "Integracion User",
+                "email": "integracion@test.com"
+            },
+            "ticket": {
+                "asunto": "Incidente",
+                "descripcion": "Detalle incidente",
+                "prioridad": "alta"
+            }
+        }
+    }
+
+    response = client.post("/api/v2/integraciones/ingreso/", payload, format="json")
+
+    assert response.status_code == 202
+    assert response.data["normalizado"] is True
+    assert Ticket.objects.count() == 1
 
