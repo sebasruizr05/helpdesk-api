@@ -39,9 +39,9 @@ EXPOSE 8000
 # Health check: verifica que la API esté respondiendo
 # Si falla 3 veces, Docker considera que el contenedor no está sano
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/api/v2/solicitantes/', timeout=5)" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:${PORT:-8000}/api/v2/', timeout=5)" || exit 1
 
 # Comando de inicio:
 # 1. Ejecuta migraciones de BD
 # 2. Inicia gunicorn con 3 workers y 2 threads
-CMD sh -c "python manage.py migrate && gunicorn helpdesk.wsgi:application --bind 0.0.0.0:8000 --workers 3 --threads 2 --worker-class gthread --max-requests 1000 --max-requests-jitter 100"
+CMD sh -c "python manage.py migrate && gunicorn helpdesk.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3 --threads 2 --worker-class gthread --max-requests 1000 --max-requests-jitter 100"
