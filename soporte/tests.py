@@ -329,3 +329,56 @@ def test_integracion_eventos_lista_eventos_y_filtra_por_direccion():
     assert response.data["count"] == 1
     assert response.data["results"][0]["trace_id"] == "trace-entrada"
     assert response.data["results"][0]["direccion"] == "entrada"
+
+
+@pytest.mark.django_db
+def test_chain_corrige_payload_doble_y_lo_deja_editable(monkeypatch):
+    client = APIClient()
+
+    captured = {}
+
+    class DummyResponse:
+        status_code = 200
+        ok = True
+        text = '{"status": "received"}'
+
+        def json(self):
+            return {"status": "received"}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return DummyResponse()
+
+    monkeypatch.setattr("soporte.views.requests.post", fake_post)
+
+    payload = {
+        "meta": {
+            "antes": "google-cloud-soporte",
+            "origen": "aws-futbol-api",
+            "siguiente": "http://fallback-peer/api/v2/chain",
+        },
+        "payload": {
+            "payload": {
+                "geografia": {
+                    "continent": {},
+                    "country": {},
+                    "city": {},
+                },
+                "soporte": {
+                    "solicitante": {},
+                    "ticket": {},
+                    "comentario": {},
+                },
+            }
+        },
+    }
+
+    response = client.post("/api/v2/chain/", payload, format="json")
+
+    assert response.status_code == 200
+    assert response.data["payload_editado_localmente"] is True
+    assert captured["json"]["payload"]["geografia"]["continent"] == {}
+    assert captured["json"]["payload"]["soporte"]["ticket"] == {}
+    assert captured["json"]["payload"]["futbol"]["equipo"] == {}
+    assert captured["json"]["mi_aporte"]["payload_original"] == payload["payload"]

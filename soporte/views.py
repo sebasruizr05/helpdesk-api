@@ -90,6 +90,37 @@ def _extract_chain_content(request_json):
     return {"raw_value": request_json}
 
 
+def _normalize_chain_content(chain_content):
+    # Corrige payloads doblemente empaquetados y garantiza una estructura compartida editable.
+    if not isinstance(chain_content, dict):
+        return chain_content, False
+
+    normalized = deepcopy(chain_content)
+    edited = False
+
+    while set(normalized.keys()) == {"payload"} and isinstance(normalized.get("payload"), dict):
+        normalized = deepcopy(normalized["payload"])
+        edited = True
+
+    expected_sections = {
+        "geografia": ["continent", "country", "city"],
+        "soporte": ["solicitante", "ticket", "comentario"],
+        "futbol": ["equipo", "jugador", "partido"],
+    }
+
+    if any(section in normalized for section in expected_sections):
+        for section, keys in expected_sections.items():
+            if not isinstance(normalized.get(section), dict):
+                normalized[section] = {}
+                edited = True
+            for key in keys:
+                if key not in normalized[section] or not isinstance(normalized[section][key], dict):
+                    normalized[section][key] = {}
+                    edited = True
+
+    return normalized, edited
+
+
 def _build_chain_payload(previous_payload, trace_id, next_url, chain_content):
     outgoing_payload = deepcopy(previous_payload)
     outgoing_payload["meta"] = {
@@ -250,17 +281,22 @@ class ChainAPIView(APIView):
             estado="pendiente",
         )
 
-        chain_content = _extract_chain_content(request_json)
+        extracted_content = _extract_chain_content(request_json)
+        chain_content, payload_edited = _normalize_chain_content(extracted_content)
         outgoing_payload = _build_chain_payload(request_json, trace_id, next_url, chain_content)
         forward_payload = _build_forward_payload(next_url, outgoing_payload, chain_content)
         if configured_previous_url:
             outgoing_payload["meta"]["nodo_anterior_configurado"] = configured_previous_url
+        if isinstance(outgoing_payload.get("mi_aporte"), dict):
+            outgoing_payload["mi_aporte"]["payload_editado_localmente"] = payload_edited
+            outgoing_payload["mi_aporte"]["payload_original"] = extracted_content
 
         inbound_response = {
             "status": "accepted",
             "trace_id": trace_id,
             "forwarded": False,
             "content_keys": sorted(chain_content.keys()) if isinstance(chain_content, dict) else [],
+            "payload_editado_localmente": payload_edited,
             "previous_url": configured_previous_url,
             "next_url": next_url,
             "message": "Payload procesado localmente.",
