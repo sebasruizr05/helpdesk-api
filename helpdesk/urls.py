@@ -19,6 +19,7 @@ from soporte.views import (
     ComentarioViewSetV2,
     IntegracionIngresoAPIView,
     ChainAPIView,
+    IntegracionEventosAPIView,
 )
 
 # ============ V1 ROUTER ============
@@ -43,6 +44,7 @@ urlpatterns = [
     # API v2 (Mejorada)
     path("api/v2/", include(router_v2.urls)),
     path("api/v2/integraciones/ingreso/", IntegracionIngresoAPIView.as_view(), name="integracion-ingreso"),
+    path("api/v2/integraciones/eventos/", IntegracionEventosAPIView.as_view(), name="integracion-eventos"),
     path("api/v2/chain/", ChainAPIView.as_view(), name="chain"),
     
     # Documentación OpenAPI (Swagger)

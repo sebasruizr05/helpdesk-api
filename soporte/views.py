@@ -348,6 +348,57 @@ class ChainAPIView(APIView):
             inbound_event.save(update_fields=["estado", "status_code", "response_json", "error", "updated_at"])
             return Response(error_response, status=status.HTTP_502_BAD_GATEWAY)
 
+
+class IntegracionEventosAPIView(APIView):
+    # Permite consultar lo recibido y enviado por la API.
+    # Filtros disponibles: ?direccion=entrada|salida y ?trace_id=...
+
+    def get(self, request):
+        queryset = IntegracionEvento.objects.all().order_by("-created_at")
+
+        direccion = request.query_params.get("direccion")
+        if direccion:
+            queryset = queryset.filter(direccion=direccion)
+
+        trace_id = request.query_params.get("trace_id")
+        if trace_id:
+            queryset = queryset.filter(trace_id=trace_id)
+
+        limit = request.query_params.get("limit", "20")
+        try:
+            limit = max(1, min(int(limit), 100))
+        except (TypeError, ValueError):
+            limit = 20
+
+        eventos = []
+        for evento in queryset[:limit]:
+            eventos.append(
+                {
+                    "id": evento.id,
+                    "trace_id": evento.trace_id,
+                    "direccion": evento.direccion,
+                    "estado": evento.estado,
+                    "sistema_origen": evento.sistema_origen,
+                    "sistema_destino": evento.sistema_destino,
+                    "endpoint": evento.endpoint,
+                    "metodo": evento.metodo,
+                    "status_code": evento.status_code,
+                    "request_json": evento.request_json,
+                    "response_json": evento.response_json,
+                    "error": evento.error,
+                    "created_at": evento.created_at,
+                    "updated_at": evento.updated_at,
+                }
+            )
+
+        return Response(
+            {
+                "count": len(eventos),
+                "results": eventos,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 # ============ V1 VIEWSETS - VERSIÓN ORIGINAL ============
 # Estos viewsets manejan las solicitudes HTTP de la API v1.
 # Mantienen la estructura original sin cambios.

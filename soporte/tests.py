@@ -272,3 +272,60 @@ def test_chain_usa_next_api_url_como_respaldo(monkeypatch):
     assert captured["url"] == "http://fallback-peer/api/v2/chain"
     assert captured["json"]["meta"]["origen"] == "helpdesk-api"
     assert captured["json"]["payload"]["continent_id"] == 4
+
+
+@pytest.mark.django_db
+def test_integracion_eventos_lista_eventos_y_filtra_por_direccion():
+    client = APIClient()
+
+    IntegracionEvento.objects.create(
+        trace_id="trace-entrada",
+        direccion="entrada",
+        sistema_origen="aws-futbol-api",
+        sistema_destino="helpdesk-api",
+        endpoint="/api/v2/chain/",
+        metodo="POST",
+        request_json={
+            "meta": {
+                "antes": "google-cloud-soporte",
+                "origen": "aws-futbol-api",
+                "siguiente": None,
+            },
+            "payload": {
+                "geografia": {
+                    "continent": {},
+                    "country": {},
+                    "city": {},
+                },
+                "soporte": {
+                    "solicitante": {},
+                    "ticket": {},
+                    "comentario": {},
+                },
+                "futbol": {
+                    "equipo": {},
+                    "jugador": {},
+                    "partido": {},
+                },
+            },
+        },
+        estado="exitoso",
+    )
+
+    IntegracionEvento.objects.create(
+        trace_id="trace-salida",
+        direccion="salida",
+        sistema_origen="helpdesk-api",
+        sistema_destino="aws-final-api",
+        endpoint="http://13.59.49.180:8000/api/v2/integracion/",
+        metodo="POST",
+        request_json={"geografia": {}, "soporte": {}, "futbol": {}},
+        estado="exitoso",
+    )
+
+    response = client.get("/api/v2/integraciones/eventos/?direccion=entrada&limit=10")
+
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    assert response.data["results"][0]["trace_id"] == "trace-entrada"
+    assert response.data["results"][0]["direccion"] == "entrada"
