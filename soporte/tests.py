@@ -206,7 +206,7 @@ def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
         "meta": {
             "antes": None,
             "origen": "peer-a",
-            "siguiente": "http://json-ignorado/api/v2/chain",
+            "siguiente": "http://13.59.49.180:8000/api/v2/integracion/",
         },
         "payload": {
             "continent_id": 9,
@@ -214,19 +214,61 @@ def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
             "city_id": 810,
         },
     }
-    monkeypatch.setenv("NEXT_API_URL", "http://next-peer/api/v2/chain")
+    monkeypatch.setenv("NEXT_API_URL", "http://fallback-peer/api/v2/chain")
 
     response = client.post("/api/v2/chain/", payload, format="json")
 
     assert response.status_code == 200
     assert response.data["forwarded"] is True
-    assert captured["url"] == "http://next-peer/api/v2/chain"
+    assert captured["url"] == "http://13.59.49.180:8000/api/v2/integracion/"
     assert captured["headers"]["X-Integration-Token"] == "secret-chain-token"
-    assert captured["json"]["meta"]["origen"] == "helpdesk-api"
-    assert captured["json"]["meta"]["antes"]["meta"]["origen"] == "peer-a"
-    assert captured["json"]["payload"]["continent_id"] == 9
-    assert captured["json"]["payload"]["country_id"] == 57
-    assert captured["json"]["payload"]["city_id"] == 810
-    assert captured["json"]["mi_aporte"]["keys_recibidas"] == ["city_id", "continent_id", "country_id"]
+    assert captured["json"]["continent_id"] == 9
+    assert captured["json"]["country_id"] == 57
+    assert captured["json"]["city_id"] == 810
+    assert response.data["payload_cadena"]["meta"]["origen"] == "helpdesk-api"
+    assert response.data["payload_cadena"]["meta"]["antes"]["meta"]["origen"] == "peer-a"
     assert IntegracionEvento.objects.filter(direccion="entrada").count() == 1
     assert IntegracionEvento.objects.filter(direccion="salida").count() == 1
+
+
+@pytest.mark.django_db
+def test_chain_usa_next_api_url_como_respaldo(monkeypatch):
+    client = APIClient()
+
+    captured = {}
+
+    class DummyResponse:
+        status_code = 200
+        ok = True
+        text = '{"status": "received"}'
+
+        def json(self):
+            return {"status": "received"}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return DummyResponse()
+
+    monkeypatch.setattr("soporte.views.requests.post", fake_post)
+    monkeypatch.setenv("NEXT_API_URL", "http://fallback-peer/api/v2/chain")
+
+    payload = {
+        "meta": {
+            "antes": None,
+            "origen": "peer-a",
+            "siguiente": None,
+        },
+        "payload": {
+            "continent_id": 4,
+            "country_id": 8,
+            "city_id": 15,
+        },
+    }
+
+    response = client.post("/api/v2/chain/", payload, format="json")
+
+    assert response.status_code == 200
+    assert captured["url"] == "http://fallback-peer/api/v2/chain"
+    assert captured["json"]["meta"]["origen"] == "helpdesk-api"
+    assert captured["json"]["payload"]["continent_id"] == 4

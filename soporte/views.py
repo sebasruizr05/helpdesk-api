@@ -110,6 +110,14 @@ def _build_chain_payload(previous_payload, trace_id, next_url, chain_content):
     return outgoing_payload
 
 
+def _build_forward_payload(next_url, chain_payload, chain_content):
+    # Si el siguiente nodo también usa /chain, conserva la envoltura completa.
+    # Si no, envía solo el payload de negocio para compatibilidad.
+    if next_url and "/chain" in next_url:
+        return chain_payload
+    return chain_content
+
+
 def _persist_normalized_payload(normalized):
     if not normalized:
         return None
@@ -229,7 +237,7 @@ class ChainAPIView(APIView):
             or request_json.get("source")
             or "unknown"
         )
-        next_url = configured_next_url or meta.get("siguiente")
+        next_url = meta.get("siguiente") or configured_next_url
 
         inbound_event = IntegracionEvento.objects.create(
             trace_id=trace_id,
@@ -244,6 +252,7 @@ class ChainAPIView(APIView):
 
         chain_content = _extract_chain_content(request_json)
         outgoing_payload = _build_chain_payload(request_json, trace_id, next_url, chain_content)
+        forward_payload = _build_forward_payload(next_url, outgoing_payload, chain_content)
         if configured_previous_url:
             outgoing_payload["meta"]["nodo_anterior_configurado"] = configured_previous_url
 
@@ -271,7 +280,7 @@ class ChainAPIView(APIView):
             sistema_destino="chain-next",
             endpoint=next_url,
             metodo="POST",
-            request_json=outgoing_payload,
+            request_json=forward_payload,
             estado="pendiente",
         )
 
@@ -288,7 +297,7 @@ class ChainAPIView(APIView):
         try:
             external_response = requests.post(
                 next_url,
-                json=outgoing_payload,
+                json=forward_payload,
                 headers=headers,
                 timeout=timeout_seconds,
             )
@@ -307,7 +316,8 @@ class ChainAPIView(APIView):
                     "forwarded": external_response.ok,
                     "status_code": external_response.status_code,
                     "target_response": next_response_json,
-                    "payload_enviado": outgoing_payload,
+                    "payload_enviado": forward_payload,
+                    "payload_cadena": outgoing_payload,
                 }
             )
             inbound_event.estado = "exitoso" if external_response.ok else "fallido"
@@ -323,7 +333,8 @@ class ChainAPIView(APIView):
                 **inbound_response,
                 "error": "Error de comunicación con el siguiente nodo",
                 "detalle": str(exc),
-                "payload_enviado": outgoing_payload,
+                "payload_enviado": forward_payload,
+                "payload_cadena": outgoing_payload,
             }
             outbound_event.estado = "fallido"
             outbound_event.status_code = status.HTTP_502_BAD_GATEWAY
