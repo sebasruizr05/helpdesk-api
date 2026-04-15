@@ -122,10 +122,17 @@ def _normalize_chain_content(chain_content):
 
 
 def _build_chain_payload(previous_payload, trace_id, next_url, chain_content):
+    previous_meta = previous_payload.get("meta", {}) if isinstance(previous_payload, dict) else {}
+    previous_origin = previous_meta.get("origen") if isinstance(previous_meta, dict) else None
+    previous_before = previous_meta.get("antes") if isinstance(previous_meta, dict) else None
+    before_value = previous_payload
+    if next_url and "/integracion/" in next_url:
+        before_value = previous_origin or previous_before or "unknown"
+
     outgoing_payload = deepcopy(previous_payload)
     outgoing_payload["meta"] = {
         "trace_id": trace_id,
-        "antes": previous_payload,
+        "antes": before_value,
         "origen": "helpdesk-api",
         "siguiente": next_url,
     }
