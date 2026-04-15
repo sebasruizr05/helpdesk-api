@@ -142,11 +142,8 @@ def _build_chain_payload(previous_payload, trace_id, next_url, chain_content):
 
 
 def _build_forward_payload(next_url, chain_payload, chain_content):
-    # Si el siguiente nodo también usa /chain, conserva la envoltura completa.
-    # Si no, envía el payload dentro de "contenido" para compatibilidad.
-    if next_url and "/chain" in next_url:
-        return chain_payload
-    return {"contenido": chain_content}
+    # Para esta integración compartida, el contrato de salida es siempre meta + payload.
+    return chain_payload
 
 
 def _deep_merge_dicts(base, incoming):
