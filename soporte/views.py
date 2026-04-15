@@ -6,6 +6,8 @@ import requests
 import logging
 import os
 import uuid
+from copy import deepcopy
+from django.utils import timezone
 
 from .models import Solicitante, Ticket, Comentario, IntegracionEvento
 from .serializers import (
@@ -70,6 +72,68 @@ def _normalize_integration_payload(raw_payload):
     }
 
 
+def _get_request_json(raw_payload):
+    if isinstance(raw_payload, (dict, list)):
+        return raw_payload
+    return {"raw_value": raw_payload}
+
+
+def _extract_chain_content(request_json):
+    if isinstance(request_json, dict) and isinstance(request_json.get("payload"), dict):
+        return deepcopy(request_json["payload"])
+    if isinstance(request_json, dict):
+        return {
+            key: deepcopy(value)
+            for key, value in request_json.items()
+            if key != "meta"
+        }
+    return {"raw_value": request_json}
+
+
+def _build_chain_payload(previous_payload, trace_id, next_url, chain_content):
+    outgoing_payload = deepcopy(previous_payload)
+    outgoing_payload["meta"] = {
+        "trace_id": trace_id,
+        "antes": previous_payload,
+        "origen": "helpdesk-api",
+        "siguiente": next_url,
+    }
+    outgoing_payload["payload"] = chain_content
+
+    outgoing_payload["mi_aporte"] = {
+        "api": "helpdesk-api",
+        "environment": os.getenv("ENVIRONMENT", "development"),
+        "processed_at": timezone.now().isoformat(),
+        "keys_recibidas": sorted(chain_content.keys()) if isinstance(chain_content, dict) else [],
+        "payload_recibido": chain_content,
+    }
+    return outgoing_payload
+
+
+def _persist_normalized_payload(normalized):
+    if not normalized:
+        return None
+
+    solicitante_data = normalized["solicitante"]
+    ticket_data = normalized["ticket"]
+
+    solicitante, _ = Solicitante.objects.get_or_create(
+        email=solicitante_data["email"],
+        defaults={
+            "nombre": solicitante_data["nombre"],
+            "telefono": solicitante_data["telefono"],
+            "estado": "activo",
+        },
+    )
+
+    return Ticket.objects.create(
+        solicitante=solicitante,
+        asunto=ticket_data["asunto"],
+        descripcion=ticket_data["descripcion"],
+        prioridad=ticket_data["prioridad"],
+    )
+
+
 class IntegracionIngresoAPIView(APIView):
     # Endpoint flexible para recibir JSON desde otra nube sin contrato rígido.
     # Si no se puede normalizar a ticket, igual registra el payload y responde 202.
@@ -84,10 +148,7 @@ class IntegracionIngresoAPIView(APIView):
             )
 
         raw_payload = request.data
-        if isinstance(raw_payload, (dict, list)):
-            request_json = raw_payload
-        else:
-            request_json = {"raw_value": raw_payload}
+        request_json = _get_request_json(raw_payload)
 
         trace_id = None
         source_system = "unknown"
@@ -121,24 +182,7 @@ class IntegracionIngresoAPIView(APIView):
             evento.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
             return Response(evento.response_json, status=status.HTTP_202_ACCEPTED)
 
-        solicitante_data = normalized["solicitante"]
-        ticket_data = normalized["ticket"]
-
-        solicitante, _ = Solicitante.objects.get_or_create(
-            email=solicitante_data["email"],
-            defaults={
-                "nombre": solicitante_data["nombre"],
-                "telefono": solicitante_data["telefono"],
-                "estado": "activo",
-            },
-        )
-
-        ticket = Ticket.objects.create(
-            solicitante=solicitante,
-            asunto=ticket_data["asunto"],
-            descripcion=ticket_data["descripcion"],
-            prioridad=ticket_data["prioridad"],
-        )
+        ticket = _persist_normalized_payload(normalized)
 
         response_payload = {
             "status": "accepted",
@@ -153,6 +197,145 @@ class IntegracionIngresoAPIView(APIView):
         evento.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
 
         return Response(response_payload, status=status.HTTP_202_ACCEPTED)
+
+
+class ChainAPIView(APIView):
+    # Endpoint para recibir, enriquecer y reenviar un JSON encadenado.
+    # Conserva el payload anterior en meta.antes y agrega mi_aporte.
+
+    def post(self, request):
+        inbound_token = os.getenv("CHAIN_INBOUND_TOKEN") or os.getenv("INBOUND_TOKEN")
+        provided_token = request.headers.get("X-Integration-Token")
+        if inbound_token and inbound_token != provided_token:
+            return Response(
+                {"error": "Token de integración inválido"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        raw_payload = request.data
+        request_json = _get_request_json(raw_payload)
+        meta = request_json.get("meta", {}) if isinstance(request_json, dict) else {}
+
+        configured_previous_url = os.getenv("PREVIOUS_API_URL")
+        configured_next_url = os.getenv("NEXT_API_URL")
+        trace_id = (
+            meta.get("trace_id")
+            or request_json.get("trace_id")
+            or f"trace-{uuid.uuid4()}"
+        )
+        source_system = (
+            meta.get("origen")
+            or request_json.get("source_system")
+            or request_json.get("source")
+            or "unknown"
+        )
+        next_url = configured_next_url or meta.get("siguiente")
+
+        inbound_event = IntegracionEvento.objects.create(
+            trace_id=trace_id,
+            direccion="entrada",
+            sistema_origen=source_system,
+            sistema_destino="helpdesk-api",
+            endpoint=request.path,
+            metodo=request.method,
+            request_json=request_json,
+            estado="pendiente",
+        )
+
+        chain_content = _extract_chain_content(request_json)
+        outgoing_payload = _build_chain_payload(request_json, trace_id, next_url, chain_content)
+        if configured_previous_url:
+            outgoing_payload["meta"]["nodo_anterior_configurado"] = configured_previous_url
+
+        inbound_response = {
+            "status": "accepted",
+            "trace_id": trace_id,
+            "forwarded": False,
+            "content_keys": sorted(chain_content.keys()) if isinstance(chain_content, dict) else [],
+            "previous_url": configured_previous_url,
+            "next_url": next_url,
+            "message": "Payload procesado localmente.",
+        }
+
+        if not next_url:
+            inbound_event.estado = "exitoso"
+            inbound_event.status_code = status.HTTP_202_ACCEPTED
+            inbound_event.response_json = inbound_response
+            inbound_event.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
+            return Response(inbound_response, status=status.HTTP_202_ACCEPTED)
+
+        outbound_event = IntegracionEvento.objects.create(
+            trace_id=trace_id,
+            direccion="salida",
+            sistema_origen="helpdesk-api",
+            sistema_destino="chain-next",
+            endpoint=next_url,
+            metodo="POST",
+            request_json=outgoing_payload,
+            estado="pendiente",
+        )
+
+        headers = {"Content-Type": "application/json"}
+        outbound_token = os.getenv("CHAIN_OUTBOUND_TOKEN") or os.getenv("OUTBOUND_TOKEN")
+        if outbound_token:
+            headers["X-Integration-Token"] = outbound_token
+
+        try:
+            timeout_seconds = int(os.getenv("TARGET_TIMEOUT_SECONDS", "10"))
+        except (TypeError, ValueError):
+            timeout_seconds = 10
+
+        try:
+            external_response = requests.post(
+                next_url,
+                json=outgoing_payload,
+                headers=headers,
+                timeout=timeout_seconds,
+            )
+            try:
+                next_response_json = external_response.json()
+            except ValueError:
+                next_response_json = {"raw_response": external_response.text}
+
+            outbound_event.status_code = external_response.status_code
+            outbound_event.response_json = next_response_json
+            outbound_event.estado = "exitoso" if external_response.ok else "fallido"
+            outbound_event.save(update_fields=["status_code", "response_json", "estado", "updated_at"])
+
+            inbound_response.update(
+                {
+                    "forwarded": external_response.ok,
+                    "status_code": external_response.status_code,
+                    "target_response": next_response_json,
+                    "payload_enviado": outgoing_payload,
+                }
+            )
+            inbound_event.estado = "exitoso" if external_response.ok else "fallido"
+            inbound_event.status_code = external_response.status_code
+            inbound_event.response_json = inbound_response
+            inbound_event.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
+
+            response_status = status.HTTP_200_OK if external_response.ok else status.HTTP_502_BAD_GATEWAY
+            return Response(inbound_response, status=response_status)
+
+        except requests.RequestException as exc:
+            error_response = {
+                **inbound_response,
+                "error": "Error de comunicación con el siguiente nodo",
+                "detalle": str(exc),
+                "payload_enviado": outgoing_payload,
+            }
+            outbound_event.estado = "fallido"
+            outbound_event.status_code = status.HTTP_502_BAD_GATEWAY
+            outbound_event.error = str(exc)
+            outbound_event.save(update_fields=["estado", "status_code", "error", "updated_at"])
+
+            inbound_event.estado = "fallido"
+            inbound_event.status_code = status.HTTP_502_BAD_GATEWAY
+            inbound_event.response_json = error_response
+            inbound_event.error = str(exc)
+            inbound_event.save(update_fields=["estado", "status_code", "response_json", "error", "updated_at"])
+            return Response(error_response, status=status.HTTP_502_BAD_GATEWAY)
 
 # ============ V1 VIEWSETS - VERSIÓN ORIGINAL ============
 # Estos viewsets manejan las solicitudes HTTP de la API v1.

@@ -149,3 +149,84 @@ def test_integracion_ingreso_crea_ticket_si_mapea():
     assert response.data["normalizado"] is True
     assert Ticket.objects.count() == 1
 
+
+@pytest.mark.django_db
+def test_chain_procesa_payload_y_no_reenvia_si_no_hay_siguiente(monkeypatch):
+    client = APIClient()
+    monkeypatch.delenv("NEXT_API_URL", raising=False)
+
+    payload = {
+        "meta": {
+            "antes": None,
+            "origen": "peer-a",
+            "siguiente": None,
+        },
+        "payload": {
+            "continent_id": 5,
+            "country_id": 25,
+            "city_id": 301,
+        },
+    }
+
+    response = client.post("/api/v2/chain/", payload, format="json")
+
+    assert response.status_code == 202
+    assert response.data["forwarded"] is False
+    assert response.data["content_keys"] == ["city_id", "continent_id", "country_id"]
+    assert Ticket.objects.count() == 0
+    assert IntegracionEvento.objects.filter(direccion="entrada").count() == 1
+    assert IntegracionEvento.objects.filter(direccion="salida").count() == 0
+
+
+@pytest.mark.django_db
+def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
+    client = APIClient()
+
+    captured = {}
+
+    class DummyResponse:
+        status_code = 200
+        ok = True
+        text = '{"status": "received"}'
+
+        def json(self):
+            return {"status": "received"}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return DummyResponse()
+
+    monkeypatch.setattr("soporte.views.requests.post", fake_post)
+    monkeypatch.setenv("CHAIN_OUTBOUND_TOKEN", "secret-chain-token")
+
+    payload = {
+        "meta": {
+            "antes": None,
+            "origen": "peer-a",
+            "siguiente": "http://json-ignorado/api/v2/chain",
+        },
+        "payload": {
+            "continent_id": 9,
+            "country_id": 57,
+            "city_id": 810,
+        },
+    }
+    monkeypatch.setenv("NEXT_API_URL", "http://next-peer/api/v2/chain")
+
+    response = client.post("/api/v2/chain/", payload, format="json")
+
+    assert response.status_code == 200
+    assert response.data["forwarded"] is True
+    assert captured["url"] == "http://next-peer/api/v2/chain"
+    assert captured["headers"]["X-Integration-Token"] == "secret-chain-token"
+    assert captured["json"]["meta"]["origen"] == "helpdesk-api"
+    assert captured["json"]["meta"]["antes"]["meta"]["origen"] == "peer-a"
+    assert captured["json"]["payload"]["continent_id"] == 9
+    assert captured["json"]["payload"]["country_id"] == 57
+    assert captured["json"]["payload"]["city_id"] == 810
+    assert captured["json"]["mi_aporte"]["keys_recibidas"] == ["city_id", "continent_id", "country_id"]
+    assert IntegracionEvento.objects.filter(direccion="entrada").count() == 1
+    assert IntegracionEvento.objects.filter(direccion="salida").count() == 1
