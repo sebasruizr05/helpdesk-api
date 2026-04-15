@@ -181,12 +181,31 @@ def test_chain_procesa_payload_y_no_reenvia_si_no_hay_siguiente(monkeypatch):
 @pytest.mark.django_db
 def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
     client = APIClient()
+    captured = {}
+
+    class DummyResponse:
+        status_code = 200
+        ok = True
+        text = '{"status": "received"}'
+
+        def json(self):
+            return {"status": "received"}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        return DummyResponse()
+
+    monkeypatch.setattr("soporte.views.requests.post", fake_post)
+    monkeypatch.setenv("CHAIN_OUTBOUND_TOKEN", "secret-chain-token")
 
     payload = {
         "meta": {
             "antes": None,
             "origen": "peer-a",
             "siguiente": "http://13.59.49.180:8000/api/v2/integracion/",
+            "auto_forward": True,
         },
         "payload": {
             "continent_id": 9,
@@ -198,10 +217,14 @@ def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
 
     response = client.post("/api/v2/chain/", payload, format="json")
 
-    assert response.status_code == 202
-    assert response.data["forwarded"] is False
+    assert response.status_code == 200
+    assert response.data["forwarded"] is True
+    assert captured["url"] == "http://13.59.49.180:8000/api/v2/integracion/"
+    assert captured["headers"]["X-Integration-Token"] == "secret-chain-token"
+    assert captured["json"]["meta"]["origen"] == "helpdesk-api"
+    assert captured["json"]["payload"]["continent_id"] == 9
     assert IntegracionEvento.objects.filter(direccion="entrada").count() == 1
-    assert IntegracionEvento.objects.filter(direccion="salida").count() == 0
+    assert IntegracionEvento.objects.filter(direccion="salida").count() == 1
 
 
 @pytest.mark.django_db
@@ -226,6 +249,7 @@ def test_chain_usa_next_api_url_como_respaldo(monkeypatch):
 
     assert response.status_code == 202
     assert response.data["next_url"] == "http://fallback-peer/api/v2/chain"
+    assert response.data["auto_forward"] is False
 
 
 @pytest.mark.django_db

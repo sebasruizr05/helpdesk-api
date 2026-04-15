@@ -179,6 +179,78 @@ def _build_send_response(inbound_response, external_response, next_response_json
     return inbound_response
 
 
+def _send_to_next(trace_id, next_url, outgoing_payload, forward_payload):
+    outbound_event = IntegracionEvento.objects.create(
+        trace_id=trace_id,
+        direccion="salida",
+        sistema_origen="helpdesk-api",
+        sistema_destino="chain-next",
+        endpoint=next_url,
+        metodo="POST",
+        request_json=forward_payload,
+        estado="pendiente",
+    )
+
+    headers = {"Content-Type": "application/json"}
+    outbound_token = os.getenv("CHAIN_OUTBOUND_TOKEN") or os.getenv("OUTBOUND_TOKEN")
+    if outbound_token:
+        headers["X-Integration-Token"] = outbound_token
+
+    try:
+        timeout_seconds = int(os.getenv("TARGET_TIMEOUT_SECONDS", "10"))
+    except (TypeError, ValueError):
+        timeout_seconds = 10
+
+    response_payload = {
+        "status": "accepted",
+        "trace_id": trace_id,
+        "next_url": next_url,
+        "forwarded": False,
+    }
+
+    try:
+        external_response = requests.post(
+            next_url,
+            json=forward_payload,
+            headers=headers,
+            timeout=timeout_seconds,
+        )
+        try:
+            next_response_json = external_response.json()
+        except ValueError:
+            next_response_json = {"raw_response": external_response.text}
+
+        outbound_event.status_code = external_response.status_code
+        outbound_event.response_json = next_response_json
+        outbound_event.estado = "exitoso" if external_response.ok else "fallido"
+        outbound_event.save(update_fields=["status_code", "response_json", "estado", "updated_at"])
+
+        response_payload = _build_send_response(
+            response_payload,
+            external_response,
+            next_response_json,
+            forward_payload,
+            outgoing_payload,
+        )
+        response_status = status.HTTP_200_OK if external_response.ok else status.HTTP_502_BAD_GATEWAY
+        return response_payload, response_status
+
+    except requests.RequestException as exc:
+        response_payload.update(
+            {
+                "error": "Error de comunicación con el siguiente nodo",
+                "detalle": str(exc),
+                "payload_enviado": forward_payload,
+                "payload_cadena": outgoing_payload,
+            }
+        )
+        outbound_event.estado = "fallido"
+        outbound_event.status_code = status.HTTP_502_BAD_GATEWAY
+        outbound_event.error = str(exc)
+        outbound_event.save(update_fields=["estado", "status_code", "error", "updated_at"])
+        return response_payload, status.HTTP_502_BAD_GATEWAY
+
+
 def _persist_normalized_payload(normalized):
     if not normalized:
         return None
@@ -270,7 +342,7 @@ class IntegracionIngresoAPIView(APIView):
 
 class ChainAPIView(APIView):
     # Endpoint para recibir y guardar un JSON encadenado.
-    # El envío al siguiente nodo se hace manualmente desde otro endpoint.
+    # Si meta.auto_forward=true, reenvia automaticamente al siguiente nodo.
 
     def post(self, request):
         inbound_token = os.getenv("CHAIN_INBOUND_TOKEN") or os.getenv("INBOUND_TOKEN")
@@ -299,6 +371,7 @@ class ChainAPIView(APIView):
             or "unknown"
         )
         next_url = meta.get("siguiente") or configured_next_url
+        auto_forward = meta.get("auto_forward") is True
 
         inbound_event = IntegracionEvento.objects.create(
             trace_id=trace_id,
@@ -329,8 +402,24 @@ class ChainAPIView(APIView):
             "payload_editado_localmente": payload_edited,
             "previous_url": configured_previous_url,
             "next_url": next_url,
+            "auto_forward": auto_forward,
             "message": "Payload recibido y almacenado localmente. El envio al siguiente nodo es manual.",
         }
+
+        if auto_forward and next_url:
+            send_response, response_status = _send_to_next(
+                trace_id,
+                next_url,
+                outgoing_payload,
+                forward_payload,
+            )
+            inbound_response.update(send_response)
+            inbound_response["message"] = "Payload recibido y reenviado automaticamente al siguiente nodo."
+            inbound_event.estado = "exitoso" if inbound_response.get("forwarded") else "fallido"
+            inbound_event.status_code = inbound_response.get("status_code", response_status)
+            inbound_event.response_json = inbound_response
+            inbound_event.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
+            return Response(inbound_response, status=response_status)
 
         inbound_event.estado = "exitoso"
         inbound_event.status_code = status.HTTP_202_ACCEPTED
@@ -426,75 +515,13 @@ class IntegracionEnviarAPIView(APIView):
 
         forward_payload = _build_forward_payload(next_url, outgoing_payload, merged_content)
 
-        outbound_event = IntegracionEvento.objects.create(
-            trace_id=trace_id,
-            direccion="salida",
-            sistema_origen="helpdesk-api",
-            sistema_destino="chain-next",
-            endpoint=next_url,
-            metodo="POST",
-            request_json=forward_payload,
-            estado="pendiente",
+        response_payload, response_status = _send_to_next(
+            trace_id,
+            next_url,
+            outgoing_payload,
+            forward_payload,
         )
-
-        headers = {"Content-Type": "application/json"}
-        outbound_token = os.getenv("CHAIN_OUTBOUND_TOKEN") or os.getenv("OUTBOUND_TOKEN")
-        if outbound_token:
-            headers["X-Integration-Token"] = outbound_token
-
-        try:
-            timeout_seconds = int(os.getenv("TARGET_TIMEOUT_SECONDS", "10"))
-        except (TypeError, ValueError):
-            timeout_seconds = 10
-
-        response_payload = {
-            "status": "accepted",
-            "trace_id": trace_id,
-            "next_url": next_url,
-            "forwarded": False,
-        }
-
-        try:
-            external_response = requests.post(
-                next_url,
-                json=forward_payload,
-                headers=headers,
-                timeout=timeout_seconds,
-            )
-            try:
-                next_response_json = external_response.json()
-            except ValueError:
-                next_response_json = {"raw_response": external_response.text}
-
-            outbound_event.status_code = external_response.status_code
-            outbound_event.response_json = next_response_json
-            outbound_event.estado = "exitoso" if external_response.ok else "fallido"
-            outbound_event.save(update_fields=["status_code", "response_json", "estado", "updated_at"])
-
-            response_payload = _build_send_response(
-                response_payload,
-                external_response,
-                next_response_json,
-                forward_payload,
-                outgoing_payload,
-            )
-            response_status = status.HTTP_200_OK if external_response.ok else status.HTTP_502_BAD_GATEWAY
-            return Response(response_payload, status=response_status)
-
-        except requests.RequestException as exc:
-            response_payload.update(
-                {
-                    "error": "Error de comunicación con el siguiente nodo",
-                    "detalle": str(exc),
-                    "payload_enviado": forward_payload,
-                    "payload_cadena": outgoing_payload,
-                }
-            )
-            outbound_event.estado = "fallido"
-            outbound_event.status_code = status.HTTP_502_BAD_GATEWAY
-            outbound_event.error = str(exc)
-            outbound_event.save(update_fields=["estado", "status_code", "error", "updated_at"])
-            return Response(response_payload, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(response_payload, status=response_status)
 
 # ============ V1 VIEWSETS - VERSIÓN ORIGINAL ============
 # Estos viewsets manejan las solicitudes HTTP de la API v1.
