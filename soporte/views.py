@@ -143,10 +143,36 @@ def _build_chain_payload(previous_payload, trace_id, next_url, chain_content):
 
 def _build_forward_payload(next_url, chain_payload, chain_content):
     # Si el siguiente nodo también usa /chain, conserva la envoltura completa.
-    # Si no, envía solo el payload de negocio para compatibilidad.
+    # Si no, envía el payload dentro de "contenido" para compatibilidad.
     if next_url and "/chain" in next_url:
         return chain_payload
-    return chain_content
+    return {"contenido": chain_content}
+
+
+def _deep_merge_dicts(base, incoming):
+    if not isinstance(base, dict) or not isinstance(incoming, dict):
+        return deepcopy(incoming)
+
+    result = deepcopy(base)
+    for key, value in incoming.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge_dicts(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result
+
+
+def _build_send_response(inbound_response, external_response, next_response_json, forward_payload, outgoing_payload):
+    inbound_response.update(
+        {
+            "forwarded": external_response.ok,
+            "status_code": external_response.status_code,
+            "target_response": next_response_json,
+            "payload_enviado": forward_payload,
+            "payload_cadena": outgoing_payload,
+        }
+    )
+    return inbound_response
 
 
 def _persist_normalized_payload(normalized):
@@ -239,8 +265,8 @@ class IntegracionIngresoAPIView(APIView):
 
 
 class ChainAPIView(APIView):
-    # Endpoint para recibir, enriquecer y reenviar un JSON encadenado.
-    # Conserva el payload anterior en meta.antes y agrega mi_aporte.
+    # Endpoint para recibir y guardar un JSON encadenado.
+    # El envío al siguiente nodo se hace manualmente desde otro endpoint.
 
     def post(self, request):
         inbound_token = os.getenv("CHAIN_INBOUND_TOKEN") or os.getenv("INBOUND_TOKEN")
@@ -299,90 +325,14 @@ class ChainAPIView(APIView):
             "payload_editado_localmente": payload_edited,
             "previous_url": configured_previous_url,
             "next_url": next_url,
-            "message": "Payload procesado localmente.",
+            "message": "Payload recibido y almacenado localmente. El envio al siguiente nodo es manual.",
         }
 
-        if not next_url:
-            inbound_event.estado = "exitoso"
-            inbound_event.status_code = status.HTTP_202_ACCEPTED
-            inbound_event.response_json = inbound_response
-            inbound_event.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
-            return Response(inbound_response, status=status.HTTP_202_ACCEPTED)
-
-        outbound_event = IntegracionEvento.objects.create(
-            trace_id=trace_id,
-            direccion="salida",
-            sistema_origen="helpdesk-api",
-            sistema_destino="chain-next",
-            endpoint=next_url,
-            metodo="POST",
-            request_json=forward_payload,
-            estado="pendiente",
-        )
-
-        headers = {"Content-Type": "application/json"}
-        outbound_token = os.getenv("CHAIN_OUTBOUND_TOKEN") or os.getenv("OUTBOUND_TOKEN")
-        if outbound_token:
-            headers["X-Integration-Token"] = outbound_token
-
-        try:
-            timeout_seconds = int(os.getenv("TARGET_TIMEOUT_SECONDS", "10"))
-        except (TypeError, ValueError):
-            timeout_seconds = 10
-
-        try:
-            external_response = requests.post(
-                next_url,
-                json=forward_payload,
-                headers=headers,
-                timeout=timeout_seconds,
-            )
-            try:
-                next_response_json = external_response.json()
-            except ValueError:
-                next_response_json = {"raw_response": external_response.text}
-
-            outbound_event.status_code = external_response.status_code
-            outbound_event.response_json = next_response_json
-            outbound_event.estado = "exitoso" if external_response.ok else "fallido"
-            outbound_event.save(update_fields=["status_code", "response_json", "estado", "updated_at"])
-
-            inbound_response.update(
-                {
-                    "forwarded": external_response.ok,
-                    "status_code": external_response.status_code,
-                    "target_response": next_response_json,
-                    "payload_enviado": forward_payload,
-                    "payload_cadena": outgoing_payload,
-                }
-            )
-            inbound_event.estado = "exitoso" if external_response.ok else "fallido"
-            inbound_event.status_code = external_response.status_code
-            inbound_event.response_json = inbound_response
-            inbound_event.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
-
-            response_status = status.HTTP_200_OK if external_response.ok else status.HTTP_502_BAD_GATEWAY
-            return Response(inbound_response, status=response_status)
-
-        except requests.RequestException as exc:
-            error_response = {
-                **inbound_response,
-                "error": "Error de comunicación con el siguiente nodo",
-                "detalle": str(exc),
-                "payload_enviado": forward_payload,
-                "payload_cadena": outgoing_payload,
-            }
-            outbound_event.estado = "fallido"
-            outbound_event.status_code = status.HTTP_502_BAD_GATEWAY
-            outbound_event.error = str(exc)
-            outbound_event.save(update_fields=["estado", "status_code", "error", "updated_at"])
-
-            inbound_event.estado = "fallido"
-            inbound_event.status_code = status.HTTP_502_BAD_GATEWAY
-            inbound_event.response_json = error_response
-            inbound_event.error = str(exc)
-            inbound_event.save(update_fields=["estado", "status_code", "response_json", "error", "updated_at"])
-            return Response(error_response, status=status.HTTP_502_BAD_GATEWAY)
+        inbound_event.estado = "exitoso"
+        inbound_event.status_code = status.HTTP_202_ACCEPTED
+        inbound_event.response_json = inbound_response
+        inbound_event.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
+        return Response(inbound_response, status=status.HTTP_202_ACCEPTED)
 
 
 class IntegracionEventosAPIView(APIView):
@@ -434,6 +384,113 @@ class IntegracionEventosAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class IntegracionEnviarAPIView(APIView):
+    # Envio manual: toma lo recibido, lo mezcla con tu aporte local y lo envia cuando tu decidas.
+
+    def post(self, request):
+        trace_id = request.data.get("trace_id")
+        if not trace_id:
+            return Response({"error": "Se requiere trace_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        incoming_event = IntegracionEvento.objects.filter(
+            trace_id=trace_id,
+            direccion="entrada",
+        ).order_by("-created_at").first()
+        if not incoming_event:
+            return Response({"error": "No existe un evento de entrada para ese trace_id"}, status=status.HTTP_404_NOT_FOUND)
+
+        original_request = incoming_event.request_json if isinstance(incoming_event.request_json, dict) else {}
+        original_meta = original_request.get("meta", {}) if isinstance(original_request.get("meta"), dict) else {}
+        extracted_content = _extract_chain_content(original_request)
+        base_content, base_edited = _normalize_chain_content(extracted_content)
+
+        local_payload = request.data.get("payload", {})
+        local_payload = local_payload if isinstance(local_payload, dict) else {}
+        merged_content = _deep_merge_dicts(base_content, local_payload)
+
+        next_url = request.data.get("siguiente") or original_meta.get("siguiente") or os.getenv("NEXT_API_URL")
+        if not next_url:
+            return Response({"error": "Se requiere siguiente o NEXT_API_URL"}, status=status.HTTP_400_BAD_REQUEST)
+
+        outgoing_payload = _build_chain_payload(original_request, trace_id, next_url, merged_content)
+        if isinstance(outgoing_payload.get("mi_aporte"), dict):
+            outgoing_payload["mi_aporte"]["payload_editado_localmente"] = base_edited or bool(local_payload)
+            outgoing_payload["mi_aporte"]["payload_original"] = extracted_content
+            outgoing_payload["mi_aporte"]["payload_agregado_manual"] = local_payload
+
+        forward_payload = _build_forward_payload(next_url, outgoing_payload, merged_content)
+
+        outbound_event = IntegracionEvento.objects.create(
+            trace_id=trace_id,
+            direccion="salida",
+            sistema_origen="helpdesk-api",
+            sistema_destino="chain-next",
+            endpoint=next_url,
+            metodo="POST",
+            request_json=forward_payload,
+            estado="pendiente",
+        )
+
+        headers = {"Content-Type": "application/json"}
+        outbound_token = os.getenv("CHAIN_OUTBOUND_TOKEN") or os.getenv("OUTBOUND_TOKEN")
+        if outbound_token:
+            headers["X-Integration-Token"] = outbound_token
+
+        try:
+            timeout_seconds = int(os.getenv("TARGET_TIMEOUT_SECONDS", "10"))
+        except (TypeError, ValueError):
+            timeout_seconds = 10
+
+        response_payload = {
+            "status": "accepted",
+            "trace_id": trace_id,
+            "next_url": next_url,
+            "forwarded": False,
+        }
+
+        try:
+            external_response = requests.post(
+                next_url,
+                json=forward_payload,
+                headers=headers,
+                timeout=timeout_seconds,
+            )
+            try:
+                next_response_json = external_response.json()
+            except ValueError:
+                next_response_json = {"raw_response": external_response.text}
+
+            outbound_event.status_code = external_response.status_code
+            outbound_event.response_json = next_response_json
+            outbound_event.estado = "exitoso" if external_response.ok else "fallido"
+            outbound_event.save(update_fields=["status_code", "response_json", "estado", "updated_at"])
+
+            response_payload = _build_send_response(
+                response_payload,
+                external_response,
+                next_response_json,
+                forward_payload,
+                outgoing_payload,
+            )
+            response_status = status.HTTP_200_OK if external_response.ok else status.HTTP_502_BAD_GATEWAY
+            return Response(response_payload, status=response_status)
+
+        except requests.RequestException as exc:
+            response_payload.update(
+                {
+                    "error": "Error de comunicación con el siguiente nodo",
+                    "detalle": str(exc),
+                    "payload_enviado": forward_payload,
+                    "payload_cadena": outgoing_payload,
+                }
+            )
+            outbound_event.estado = "fallido"
+            outbound_event.status_code = status.HTTP_502_BAD_GATEWAY
+            outbound_event.error = str(exc)
+            outbound_event.save(update_fields=["estado", "status_code", "error", "updated_at"])
+            return Response(response_payload, status=status.HTTP_502_BAD_GATEWAY)
 
 # ============ V1 VIEWSETS - VERSIÓN ORIGINAL ============
 # Estos viewsets manejan las solicitudes HTTP de la API v1.

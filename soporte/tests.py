@@ -182,26 +182,6 @@ def test_chain_procesa_payload_y_no_reenvia_si_no_hay_siguiente(monkeypatch):
 def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
     client = APIClient()
 
-    captured = {}
-
-    class DummyResponse:
-        status_code = 200
-        ok = True
-        text = '{"status": "received"}'
-
-        def json(self):
-            return {"status": "received"}
-
-    def fake_post(url, json, headers, timeout):
-        captured["url"] = url
-        captured["json"] = json
-        captured["headers"] = headers
-        captured["timeout"] = timeout
-        return DummyResponse()
-
-    monkeypatch.setattr("soporte.views.requests.post", fake_post)
-    monkeypatch.setenv("CHAIN_OUTBOUND_TOKEN", "secret-chain-token")
-
     payload = {
         "meta": {
             "antes": None,
@@ -218,39 +198,15 @@ def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
 
     response = client.post("/api/v2/chain/", payload, format="json")
 
-    assert response.status_code == 200
-    assert response.data["forwarded"] is True
-    assert captured["url"] == "http://13.59.49.180:8000/api/v2/integracion/"
-    assert captured["headers"]["X-Integration-Token"] == "secret-chain-token"
-    assert captured["json"]["continent_id"] == 9
-    assert captured["json"]["country_id"] == 57
-    assert captured["json"]["city_id"] == 810
-    assert response.data["payload_cadena"]["meta"]["origen"] == "helpdesk-api"
-    assert response.data["payload_cadena"]["meta"]["antes"]["meta"]["origen"] == "peer-a"
+    assert response.status_code == 202
+    assert response.data["forwarded"] is False
     assert IntegracionEvento.objects.filter(direccion="entrada").count() == 1
-    assert IntegracionEvento.objects.filter(direccion="salida").count() == 1
+    assert IntegracionEvento.objects.filter(direccion="salida").count() == 0
 
 
 @pytest.mark.django_db
 def test_chain_usa_next_api_url_como_respaldo(monkeypatch):
     client = APIClient()
-
-    captured = {}
-
-    class DummyResponse:
-        status_code = 200
-        ok = True
-        text = '{"status": "received"}'
-
-        def json(self):
-            return {"status": "received"}
-
-    def fake_post(url, json, headers, timeout):
-        captured["url"] = url
-        captured["json"] = json
-        return DummyResponse()
-
-    monkeypatch.setattr("soporte.views.requests.post", fake_post)
     monkeypatch.setenv("NEXT_API_URL", "http://fallback-peer/api/v2/chain")
 
     payload = {
@@ -268,10 +224,8 @@ def test_chain_usa_next_api_url_como_respaldo(monkeypatch):
 
     response = client.post("/api/v2/chain/", payload, format="json")
 
-    assert response.status_code == 200
-    assert captured["url"] == "http://fallback-peer/api/v2/chain"
-    assert captured["json"]["meta"]["origen"] == "helpdesk-api"
-    assert captured["json"]["payload"]["continent_id"] == 4
+    assert response.status_code == 202
+    assert response.data["next_url"] == "http://fallback-peer/api/v2/chain"
 
 
 @pytest.mark.django_db
@@ -335,23 +289,6 @@ def test_integracion_eventos_lista_eventos_y_filtra_por_direccion():
 def test_chain_corrige_payload_doble_y_lo_deja_editable(monkeypatch):
     client = APIClient()
 
-    captured = {}
-
-    class DummyResponse:
-        status_code = 200
-        ok = True
-        text = '{"status": "received"}'
-
-        def json(self):
-            return {"status": "received"}
-
-    def fake_post(url, json, headers, timeout):
-        captured["url"] = url
-        captured["json"] = json
-        return DummyResponse()
-
-    monkeypatch.setattr("soporte.views.requests.post", fake_post)
-
     payload = {
         "meta": {
             "antes": "google-cloud-soporte",
@@ -376,9 +313,78 @@ def test_chain_corrige_payload_doble_y_lo_deja_editable(monkeypatch):
 
     response = client.post("/api/v2/chain/", payload, format="json")
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.data["payload_editado_localmente"] is True
-    assert captured["json"]["payload"]["geografia"]["continent"] == {}
-    assert captured["json"]["payload"]["soporte"]["ticket"] == {}
-    assert captured["json"]["payload"]["futbol"]["equipo"] == {}
-    assert captured["json"]["mi_aporte"]["payload_original"] == payload["payload"]
+
+
+@pytest.mark.django_db
+def test_integracion_enviar_hace_merge_y_envia_manual(monkeypatch):
+    client = APIClient()
+
+    captured = {}
+
+    class DummyResponse:
+        status_code = 200
+        ok = True
+        text = '{"status": "received"}'
+
+        def json(self):
+            return {"status": "received"}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        return DummyResponse()
+
+    monkeypatch.setattr("soporte.views.requests.post", fake_post)
+    monkeypatch.setenv("CHAIN_OUTBOUND_TOKEN", "secret-chain-token")
+
+    IntegracionEvento.objects.create(
+        trace_id="trace-manual",
+        direccion="entrada",
+        sistema_origen="aws-futbol-api",
+        sistema_destino="helpdesk-api",
+        endpoint="/api/v2/chain/",
+        metodo="POST",
+        request_json={
+            "meta": {
+                "antes": "google-cloud-soporte",
+                "origen": "aws-futbol-api",
+                "siguiente": "http://13.59.49.180:8000/api/v2/integracion/",
+            },
+            "payload": {
+                "geografia": {
+                    "continent": {
+                        "continent_id": 1,
+                    },
+                    "country": {},
+                    "city": {},
+                }
+            },
+        },
+        estado="exitoso",
+    )
+
+    response = client.post(
+        "/api/v2/integraciones/enviar/",
+        {
+            "trace_id": "trace-manual",
+            "payload": {
+                "soporte": {
+                    "ticket": {
+                        "ticket_id": 77,
+                    }
+                }
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["forwarded"] is True
+    assert captured["url"] == "http://13.59.49.180:8000/api/v2/integracion/"
+    assert captured["headers"]["X-Integration-Token"] == "secret-chain-token"
+    assert captured["json"]["contenido"]["geografia"]["continent"]["continent_id"] == 1
+    assert captured["json"]["contenido"]["soporte"]["ticket"]["ticket_id"] == 77
+    assert response.data["payload_cadena"]["mi_aporte"]["payload_agregado_manual"]["soporte"]["ticket"]["ticket_id"] == 77
