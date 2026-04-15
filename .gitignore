@@ -22,3 +22,11 @@ db.sqlite3
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Personal workflow / AI helper files
+COMMITS_PLAN.md
+EJECUTAR_COMMITS.md
+PLAN_DESPLIEGUE_GCP.md
+PROXIMOS_PASOS.md
+hacer_commits.py
+hacer_commits.sh
