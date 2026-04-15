@@ -200,6 +200,13 @@ def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
     monkeypatch.setattr("soporte.views.requests.post", fake_post)
     monkeypatch.setenv("CHAIN_OUTBOUND_TOKEN", "secret-chain-token")
 
+    solicitante = Solicitante.objects.create(
+        nombre="Soporte Auto",
+        email="auto@test.com",
+        telefono="12345",
+        estado="activo",
+    )
+
     payload = {
         "meta": {
             "antes": None,
@@ -221,7 +228,9 @@ def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
     assert captured["url"] == "http://13.59.49.180:8000/api/v2/integracion/"
     assert captured["headers"]["X-Integration-Token"] == "secret-chain-token"
     assert captured["json"]["meta"]["origen"] == "helpdesk-api"
+    assert captured["json"]["meta"]["antes"] == "peer-a"
     assert captured["json"]["payload"]["continent_id"] == 9
+    assert captured["json"]["payload"]["soporte"]["solicitante"]["id"] == solicitante.id
     assert IntegracionEvento.objects.filter(direccion="entrada").count() == 1
     assert IntegracionEvento.objects.filter(direccion="salida").count() == 1
 

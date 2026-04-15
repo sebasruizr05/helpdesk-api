@@ -121,13 +121,89 @@ def _normalize_chain_content(chain_content):
     return normalized, edited
 
 
+def _serialize_solicitante(instance):
+    if not instance:
+        return {}
+    return {
+        "id": instance.id,
+        "nombre": instance.nombre,
+        "email": instance.email,
+        "telefono": instance.telefono,
+        "estado": instance.estado,
+    }
+
+
+def _serialize_ticket(instance):
+    if not instance:
+        return {}
+    return {
+        "id": instance.id,
+        "solicitante_id": instance.solicitante_id,
+        "asunto": instance.asunto,
+        "descripcion": instance.descripcion,
+        "estado": instance.estado,
+        "prioridad": instance.prioridad,
+    }
+
+
+def _serialize_comentario(instance):
+    if not instance:
+        return {}
+    return {
+        "id": instance.id,
+        "ticket_id": instance.ticket_id,
+        "autor": instance.autor,
+        "mensaje": instance.mensaje,
+    }
+
+
+def _resolve_instance(model, payload_section):
+    payload_section = payload_section if isinstance(payload_section, dict) else {}
+    instance_id = payload_section.get("id")
+    queryset = model.objects.all().order_by("-id")
+    if instance_id is not None:
+        return queryset.filter(pk=instance_id).first()
+    return queryset.first()
+
+
+def _enrich_support_payload(chain_content):
+    if not isinstance(chain_content, dict):
+        return chain_content, False
+
+    enriched = deepcopy(chain_content)
+    soporte = enriched.get("soporte")
+    if not isinstance(soporte, dict):
+        soporte = {}
+        enriched["soporte"] = soporte
+
+    changed = False
+
+    solicitante = _resolve_instance(Solicitante, soporte.get("solicitante"))
+    ticket = _resolve_instance(Ticket, soporte.get("ticket"))
+    comentario = _resolve_instance(Comentario, soporte.get("comentario"))
+
+    desired_solicitante = _serialize_solicitante(solicitante)
+    desired_ticket = _serialize_ticket(ticket)
+    desired_comentario = _serialize_comentario(comentario)
+
+    if desired_solicitante and soporte.get("solicitante") != desired_solicitante:
+        soporte["solicitante"] = desired_solicitante
+        changed = True
+    if desired_ticket and soporte.get("ticket") != desired_ticket:
+        soporte["ticket"] = desired_ticket
+        changed = True
+    if desired_comentario and soporte.get("comentario") != desired_comentario:
+        soporte["comentario"] = desired_comentario
+        changed = True
+
+    return enriched, changed
+
+
 def _build_chain_payload(previous_payload, trace_id, next_url, chain_content):
     previous_meta = previous_payload.get("meta", {}) if isinstance(previous_payload, dict) else {}
     previous_origin = previous_meta.get("origen") if isinstance(previous_meta, dict) else None
     previous_before = previous_meta.get("antes") if isinstance(previous_meta, dict) else None
-    before_value = previous_payload
-    if next_url and "/integracion/" in next_url:
-        before_value = previous_origin or previous_before or "unknown"
+    before_value = previous_origin or previous_before or "unknown"
 
     outgoing_payload = deepcopy(previous_payload)
     outgoing_payload["meta"] = {
@@ -385,6 +461,8 @@ class ChainAPIView(APIView):
 
         extracted_content = _extract_chain_content(request_json)
         chain_content, payload_edited = _normalize_chain_content(extracted_content)
+        chain_content, support_enriched = _enrich_support_payload(chain_content)
+        payload_edited = payload_edited or support_enriched
         outgoing_payload = _build_chain_payload(request_json, trace_id, next_url, chain_content)
         forward_payload = _build_forward_payload(next_url, outgoing_payload, chain_content)
         if configured_previous_url:
@@ -392,6 +470,7 @@ class ChainAPIView(APIView):
         if isinstance(outgoing_payload.get("mi_aporte"), dict):
             outgoing_payload["mi_aporte"]["payload_editado_localmente"] = payload_edited
             outgoing_payload["mi_aporte"]["payload_original"] = extracted_content
+            outgoing_payload["mi_aporte"]["soporte_enriquecido"] = support_enriched
 
         inbound_response = {
             "status": "accepted",
@@ -496,10 +575,14 @@ class IntegracionEnviarAPIView(APIView):
         original_meta = original_request.get("meta", {}) if isinstance(original_request.get("meta"), dict) else {}
         extracted_content = _extract_chain_content(original_request)
         base_content, base_edited = _normalize_chain_content(extracted_content)
+        base_content, support_enriched = _enrich_support_payload(base_content)
+        base_edited = base_edited or support_enriched
 
         local_payload = request.data.get("payload", {})
         local_payload = local_payload if isinstance(local_payload, dict) else {}
         merged_content = _deep_merge_dicts(base_content, local_payload)
+        merged_content, merged_support_enriched = _enrich_support_payload(merged_content)
+        base_edited = base_edited or merged_support_enriched
 
         next_url = request.data.get("siguiente") or original_meta.get("siguiente") or os.getenv("NEXT_API_URL")
         if not next_url:
@@ -510,6 +593,7 @@ class IntegracionEnviarAPIView(APIView):
             outgoing_payload["mi_aporte"]["payload_editado_localmente"] = base_edited or bool(local_payload)
             outgoing_payload["mi_aporte"]["payload_original"] = extracted_content
             outgoing_payload["mi_aporte"]["payload_agregado_manual"] = local_payload
+            outgoing_payload["mi_aporte"]["soporte_enriquecido"] = support_enriched or merged_support_enriched
 
         forward_payload = _build_forward_payload(next_url, outgoing_payload, merged_content)
 
