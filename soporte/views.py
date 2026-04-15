@@ -341,8 +341,8 @@ class IntegracionIngresoAPIView(APIView):
 
 
 class ChainAPIView(APIView):
-    # Endpoint para recibir y guardar un JSON encadenado.
-    # Si meta.auto_forward=true, reenvia automaticamente al siguiente nodo.
+    # Endpoint para recibir, enriquecer y reenviar un JSON encadenado.
+    # Si meta.siguiente tiene una URL, el reenvio ocurre en este mismo handler.
 
     def post(self, request):
         inbound_token = os.getenv("CHAIN_INBOUND_TOKEN") or os.getenv("INBOUND_TOKEN")
@@ -371,7 +371,6 @@ class ChainAPIView(APIView):
             or "unknown"
         )
         next_url = meta.get("siguiente") or configured_next_url
-        auto_forward = meta.get("auto_forward") is True
 
         inbound_event = IntegracionEvento.objects.create(
             trace_id=trace_id,
@@ -402,11 +401,10 @@ class ChainAPIView(APIView):
             "payload_editado_localmente": payload_edited,
             "previous_url": configured_previous_url,
             "next_url": next_url,
-            "auto_forward": auto_forward,
-            "message": "Payload recibido y almacenado localmente. El envio al siguiente nodo es manual.",
+            "message": "Payload recibido y almacenado localmente.",
         }
 
-        if auto_forward and next_url:
+        if next_url:
             send_response, response_status = _send_to_next(
                 trace_id,
                 next_url,

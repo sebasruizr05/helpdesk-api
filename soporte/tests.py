@@ -205,7 +205,6 @@ def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
             "antes": None,
             "origen": "peer-a",
             "siguiente": "http://13.59.49.180:8000/api/v2/integracion/",
-            "auto_forward": True,
         },
         "payload": {
             "continent_id": 9,
@@ -230,6 +229,22 @@ def test_chain_reenvia_payload_enriquecido_al_siguiente(monkeypatch):
 @pytest.mark.django_db
 def test_chain_usa_next_api_url_como_respaldo(monkeypatch):
     client = APIClient()
+    captured = {}
+
+    class DummyResponse:
+        status_code = 200
+        ok = True
+        text = '{"status": "received"}'
+
+        def json(self):
+            return {"status": "received"}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return DummyResponse()
+
+    monkeypatch.setattr("soporte.views.requests.post", fake_post)
     monkeypatch.setenv("NEXT_API_URL", "http://fallback-peer/api/v2/chain")
 
     payload = {
@@ -247,9 +262,11 @@ def test_chain_usa_next_api_url_como_respaldo(monkeypatch):
 
     response = client.post("/api/v2/chain/", payload, format="json")
 
-    assert response.status_code == 202
+    assert response.status_code == 200
     assert response.data["next_url"] == "http://fallback-peer/api/v2/chain"
-    assert response.data["auto_forward"] is False
+    assert response.data["forwarded"] is True
+    assert captured["url"] == "http://fallback-peer/api/v2/chain"
+    assert captured["json"]["payload"]["continent_id"] == 4
 
 
 @pytest.mark.django_db
