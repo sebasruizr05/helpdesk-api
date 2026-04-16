@@ -226,8 +226,13 @@ def _build_chain_payload(previous_payload, trace_id, next_url, chain_content):
 
 
 def _build_forward_payload(next_url, chain_payload, chain_content):
-    # Para esta integración compartida, el contrato de salida es siempre meta + payload.
-    return chain_payload
+    # Para el reenvío manual usamos next_url como destino HTTP, pero no propagamos
+    # esa misma URL dentro de meta.siguiente para evitar bucles o reenvíos no deseados
+    # en el siguiente microservicio.
+    forward_payload = deepcopy(chain_payload)
+    if isinstance(forward_payload.get("meta"), dict):
+        forward_payload["meta"]["siguiente"] = None
+    return forward_payload
 
 
 def _deep_merge_dicts(base, incoming):

@@ -482,6 +482,7 @@ def test_integracion_enviar_hace_merge_y_envia_manual(monkeypatch):
     assert captured["headers"]["X-Integration-Token"] == "secret-chain-token"
     assert captured["json"]["meta"]["origen"] == "helpdesk-api"
     assert captured["json"]["meta"]["antes"] == "aws-futbol-api"
+    assert captured["json"]["meta"]["siguiente"] is None
     assert captured["json"]["payload"]["geografia"]["continent"]["continent_id"] == 1
     assert captured["json"]["payload"]["soporte"]["ticket"]["ticket_id"] == 77
     assert response.data["payload_cadena"]["mi_aporte"]["payload_agregado_manual"]["soporte"]["ticket"]["ticket_id"] == 77
