@@ -431,8 +431,8 @@ class IntegracionIngresoAPIView(APIView):
 
 
 class ChainAPIView(APIView):
-    # Endpoint para recibir, enriquecer y reenviar un JSON encadenado.
-    # Si meta.siguiente tiene una URL, el reenvio ocurre en este mismo handler.
+    # Endpoint para recibir y guardar un JSON encadenado.
+    # El reenvio al siguiente nodo se realiza de manera manual desde otro endpoint.
 
     def post(self, request):
         inbound_token = os.getenv("CHAIN_INBOUND_TOKEN") or os.getenv("INBOUND_TOKEN")
@@ -497,26 +497,11 @@ class ChainAPIView(APIView):
             "payload_editado_localmente": payload_edited,
             "previous_url": configured_previous_url,
             "next_url": next_url,
-            "message": "Payload recibido y almacenado localmente.",
+            "message": "Payload recibido y almacenado localmente. El envio al siguiente nodo es manual.",
         }
         if self_forward_blocked:
             inbound_response["message"] = "Payload recibido y almacenado localmente. Se evitó reenvío a la misma URL."
             inbound_response["self_forward_blocked"] = True
-
-        if next_url:
-            send_response, response_status = _send_to_next(
-                trace_id,
-                next_url,
-                outgoing_payload,
-                forward_payload,
-            )
-            inbound_response.update(send_response)
-            inbound_response["message"] = "Payload recibido y reenviado automaticamente al siguiente nodo."
-            inbound_event.estado = "exitoso" if inbound_response.get("forwarded") else "fallido"
-            inbound_event.status_code = inbound_response.get("status_code", response_status)
-            inbound_event.response_json = inbound_response
-            inbound_event.save(update_fields=["estado", "status_code", "response_json", "updated_at"])
-            return Response(inbound_response, status=response_status)
 
         inbound_event.estado = "exitoso"
         inbound_event.status_code = status.HTTP_202_ACCEPTED
