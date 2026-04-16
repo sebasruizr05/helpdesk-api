@@ -440,3 +440,52 @@ def test_integracion_enviar_hace_merge_y_envia_manual(monkeypatch):
     assert captured["json"]["payload"]["geografia"]["continent"]["continent_id"] == 1
     assert captured["json"]["payload"]["soporte"]["ticket"]["ticket_id"] == 77
     assert response.data["payload_cadena"]["mi_aporte"]["payload_agregado_manual"]["soporte"]["ticket"]["ticket_id"] == 77
+
+
+@pytest.mark.django_db
+def test_integracion_editar_actualiza_payload_por_trace_id():
+    client = APIClient()
+
+    IntegracionEvento.objects.create(
+        trace_id="trace-edit",
+        direccion="entrada",
+        sistema_origen="api-geografia",
+        sistema_destino="helpdesk-api",
+        endpoint="/api/v2/chain/",
+        metodo="POST",
+        request_json={
+            "meta": {
+                "antes": None,
+                "origen": "api-geografia",
+                "siguiente": None,
+            },
+            "payload": {
+                "geografia": {
+                    "continent": {"id": 1, "name": "Europe"},
+                    "country": {},
+                    "city": {},
+                }
+            },
+        },
+        estado="exitoso",
+    )
+
+    response = client.patch(
+        "/api/v2/integraciones/editar/",
+        {
+            "trace_id": "trace-edit",
+            "payload": {
+                "soporte": {
+                    "solicitante": {
+                        "id": 99,
+                        "nombre": "Editado",
+                    }
+                }
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["trace_id"] == "trace-edit"
+    assert response.data["payload"]["soporte"]["solicitante"]["nombre"] == "Editado"

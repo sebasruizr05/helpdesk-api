@@ -561,6 +561,53 @@ class IntegracionEventosAPIView(APIView):
         )
 
 
+class IntegracionEditarAPIView(APIView):
+    # Permite editar parcialmente el payload recibido usando trace_id.
+
+    def patch(self, request):
+        trace_id = request.data.get("trace_id")
+        if not trace_id:
+            return Response({"error": "Se requiere trace_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        incoming_event = IntegracionEvento.objects.filter(
+            trace_id=trace_id,
+            direccion="entrada",
+        ).order_by("-created_at").first()
+        if not incoming_event:
+            return Response({"error": "No existe un evento de entrada para ese trace_id"}, status=status.HTTP_404_NOT_FOUND)
+
+        original_request = incoming_event.request_json if isinstance(incoming_event.request_json, dict) else {}
+        extracted_content = _extract_chain_content(original_request)
+        base_content, base_edited = _normalize_chain_content(extracted_content)
+        base_content, support_enriched = _enrich_support_payload(base_content)
+
+        patch_payload = request.data.get("payload", {})
+        patch_payload = patch_payload if isinstance(patch_payload, dict) else {}
+        merged_content = _deep_merge_dicts(base_content, patch_payload)
+        merged_content, merged_support_enriched = _enrich_support_payload(merged_content)
+
+        updated_request = deepcopy(original_request)
+        updated_request["payload"] = merged_content
+
+        incoming_event.request_json = updated_request
+        incoming_event.response_json = {
+            "status": "updated",
+            "trace_id": trace_id,
+            "payload_editado_localmente": base_edited or support_enriched or merged_support_enriched or bool(patch_payload),
+            "payload_agregado_manual": patch_payload,
+        }
+        incoming_event.save(update_fields=["request_json", "response_json", "updated_at"])
+
+        return Response(
+            {
+                "status": "updated",
+                "trace_id": trace_id,
+                "payload": merged_content,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class IntegracionEnviarAPIView(APIView):
     # Envio manual: toma lo recibido, lo mezcla con tu aporte local y lo envia cuando tu decidas.
 

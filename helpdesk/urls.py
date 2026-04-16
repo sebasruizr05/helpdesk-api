@@ -21,6 +21,7 @@ from soporte.views import (
     ChainAPIView,
     IntegracionEventosAPIView,
     IntegracionEnviarAPIView,
+    IntegracionEditarAPIView,
 )
 
 # ============ V1 ROUTER ============
@@ -46,6 +47,7 @@ urlpatterns = [
     path("api/v2/", include(router_v2.urls)),
     path("api/v2/integraciones/ingreso/", IntegracionIngresoAPIView.as_view(), name="integracion-ingreso"),
     path("api/v2/integraciones/eventos/", IntegracionEventosAPIView.as_view(), name="integracion-eventos"),
+    path("api/v2/integraciones/editar/", IntegracionEditarAPIView.as_view(), name="integracion-editar"),
     path("api/v2/integraciones/enviar/", IntegracionEnviarAPIView.as_view(), name="integracion-enviar"),
     path("api/v2/chain/", ChainAPIView.as_view(), name="chain"),
     
