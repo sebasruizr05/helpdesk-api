@@ -91,7 +91,7 @@ def _extract_chain_content(request_json):
 
 
 def _normalize_chain_content(chain_content):
-    # Corrige payloads doblemente empaquetados y garantiza una estructura compartida editable.
+    # Corrige payloads doblemente empaquetados sin inventar dominios que no venían en el request.
     if not isinstance(chain_content, dict):
         return chain_content, False
 
@@ -108,15 +108,16 @@ def _normalize_chain_content(chain_content):
         "futbol": ["equipo", "jugador", "partido"],
     }
 
-    if any(section in normalized for section in expected_sections):
-        for section, keys in expected_sections.items():
-            if not isinstance(normalized.get(section), dict):
-                normalized[section] = {}
+    for section, keys in expected_sections.items():
+        if section not in normalized:
+            continue
+        if not isinstance(normalized.get(section), dict):
+            normalized[section] = {}
+            edited = True
+        for key in keys:
+            if key not in normalized[section] or not isinstance(normalized[section][key], dict):
+                normalized[section][key] = {}
                 edited = True
-            for key in keys:
-                if key not in normalized[section] or not isinstance(normalized[section][key], dict):
-                    normalized[section][key] = {}
-                    edited = True
 
     return normalized, edited
 

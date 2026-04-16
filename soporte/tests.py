@@ -368,6 +368,51 @@ def test_chain_corrige_payload_doble_y_lo_deja_editable(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_editar_payload_no_agrega_dominios_ausentes():
+    client = APIClient()
+
+    IntegracionEvento.objects.create(
+        trace_id="trace-no-domains",
+        direccion="entrada",
+        sistema_origen="api-geografia",
+        sistema_destino="helpdesk-api",
+        endpoint="/api/v2/chain/",
+        metodo="POST",
+        request_json={
+            "meta": {
+                "antes": None,
+                "origen": "api-geografia",
+                "siguiente": None,
+            },
+            "payload": {
+                "geografia": {
+                    "continent": {"id": 1, "name": "Europe"},
+                }
+            },
+        },
+        estado="exitoso",
+    )
+
+    response = client.patch(
+        "/api/v2/integraciones/editar/",
+        {
+            "trace_id": "trace-no-domains",
+            "payload": {
+                "geografia": {
+                    "country": {"id": 1, "name": "France"},
+                }
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert "futbol" not in response.data["payload"]
+    assert "soporte" not in response.data["payload"]
+    assert response.data["payload"]["geografia"]["country"]["name"] == "France"
+
+
+@pytest.mark.django_db
 def test_integracion_enviar_hace_merge_y_envia_manual(monkeypatch):
     client = APIClient()
 
