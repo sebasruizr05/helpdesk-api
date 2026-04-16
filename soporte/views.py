@@ -255,6 +255,20 @@ def _build_send_response(inbound_response, external_response, next_response_json
     return inbound_response
 
 
+def _is_self_chain_url(request, next_url):
+    if not next_url:
+        return False
+
+    current_urls = {
+        request.build_absolute_uri(),
+        request.build_absolute_uri(request.path),
+    }
+
+    normalized_next = str(next_url).rstrip("/")
+    normalized_current = {url.rstrip("/") for url in current_urls}
+    return normalized_next in normalized_current
+
+
 def _send_to_next(trace_id, next_url, outgoing_payload, forward_payload):
     outbound_event = IntegracionEvento.objects.create(
         trace_id=trace_id,
@@ -447,6 +461,9 @@ class ChainAPIView(APIView):
             or "unknown"
         )
         next_url = meta.get("siguiente") or configured_next_url
+        self_forward_blocked = _is_self_chain_url(request, next_url)
+        if self_forward_blocked:
+            next_url = None
 
         inbound_event = IntegracionEvento.objects.create(
             trace_id=trace_id,
@@ -482,6 +499,9 @@ class ChainAPIView(APIView):
             "next_url": next_url,
             "message": "Payload recibido y almacenado localmente.",
         }
+        if self_forward_blocked:
+            inbound_response["message"] = "Payload recibido y almacenado localmente. Se evitó reenvío a la misma URL."
+            inbound_response["self_forward_blocked"] = True
 
         if next_url:
             send_response, response_status = _send_to_next(
@@ -519,7 +539,7 @@ class IntegracionEventosAPIView(APIView):
         trace_id = request.query_params.get("trace_id")
         if trace_id:
             queryset = queryset.filter(trace_id=trace_id)
-
+    
         limit = request.query_params.get("limit", "20")
         try:
             limit = max(1, min(int(limit), 100))
