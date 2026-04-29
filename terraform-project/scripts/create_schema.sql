@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS solicitantes_demo (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(120) NOT NULL,
+    email VARCHAR(120) NOT NULL UNIQUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tickets_demo (
+    id SERIAL PRIMARY KEY,
+    solicitante_id INTEGER NOT NULL REFERENCES solicitantes_demo(id) ON DELETE CASCADE,
+    asunto VARCHAR(200) NOT NULL,
+    estado VARCHAR(30) NOT NULL DEFAULT 'abierto',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
