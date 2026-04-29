@@ -10,10 +10,6 @@ variable "resource_prefix" {
   type = string
 }
 
-variable "network_self_link" {
-  type = string
-}
-
 variable "db_name" {
   type = string
 }
@@ -33,6 +29,10 @@ variable "db_tier" {
 
 variable "db_disk_size_gb" {
   type = number
+}
+
+variable "db_authorized_cidrs" {
+  type = list(string)
 }
 
 variable "labels" {

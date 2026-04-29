@@ -12,8 +12,16 @@ resource "google_sql_database_instance" "postgres" {
     user_labels       = var.labels
 
     ip_configuration {
-      ipv4_enabled    = false
-      private_network = var.network_self_link
+      ipv4_enabled = true
+
+      dynamic "authorized_networks" {
+        for_each = var.db_authorized_cidrs
+
+        content {
+          name  = "terraform-${replace(authorized_networks.value, "/", "-")}"
+          value = authorized_networks.value
+        }
+      }
     }
 
     backup_configuration {

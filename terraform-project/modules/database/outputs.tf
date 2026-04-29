@@ -2,8 +2,8 @@ output "instance_name" {
   value = google_sql_database_instance.postgres.name
 }
 
-output "private_ip_address" {
-  value = google_sql_database_instance.postgres.private_ip_address
+output "public_ip_address" {
+  value = google_sql_database_instance.postgres.public_ip_address
 }
 
 output "database_name" {

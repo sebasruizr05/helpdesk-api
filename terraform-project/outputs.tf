@@ -13,9 +13,9 @@ output "bastion_ssh_command" {
   value       = "gcloud compute ssh ${var.ssh_username}@${module.compute.instance_name} --zone ${var.zone} --project ${var.project_id}"
 }
 
-output "cloud_sql_private_ip" {
-  description = "IP privada de la instancia Cloud SQL."
-  value       = module.database.private_ip_address
+output "cloud_sql_public_ip" {
+  description = "IP publica de la instancia Cloud SQL."
+  value       = module.database.public_ip_address
 }
 
 output "database_name" {

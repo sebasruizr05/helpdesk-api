@@ -35,6 +35,12 @@ variable "private_service_cidr" {
   default     = "10.20.0.0/16"
 }
 
+variable "db_authorized_cidrs" {
+  description = "Rangos autorizados para conectarse a Cloud SQL por IP publica."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "ssh_username" {
   description = "Usuario que se usara para la conexion SSH."
   type        = string
