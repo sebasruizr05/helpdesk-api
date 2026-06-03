@@ -4,6 +4,48 @@ from soporte.models import Solicitante, Ticket, IntegracionEvento
 
 
 @pytest.mark.django_db
+def test_health_check_stable(monkeypatch):
+    client = APIClient()
+    monkeypatch.setenv("DEPLOY_TYPE", "stable")
+    monkeypatch.setenv("APP_VERSION", "2.0.0")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+
+    response = client.get("/health/")
+
+    assert response.status_code == 200
+    assert response.data["status"] == "stable"
+    assert response.data["version"] == "2.0.0"
+    assert response.data["app"] == "helpdesk-api"
+    assert response.data["environment"] == "production"
+    assert "timestamp" in response.data
+    assert "deploy_date" not in response.data
+    assert "features_preview" not in response.data
+
+
+@pytest.mark.django_db
+def test_health_check_canary(monkeypatch):
+    client = APIClient()
+    monkeypatch.setenv("DEPLOY_TYPE", "canary")
+    monkeypatch.setenv("APP_VERSION", "2.1.0")
+    monkeypatch.setenv("DEPLOY_DATE", "2026-06-03")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+
+    response = client.get("/health/")
+
+    assert response.status_code == 200
+    assert response.data["status"] == "canary"
+    assert response.data["version"] == "2.1.0"
+    assert response.data["app"] == "helpdesk-api"
+    assert response.data["environment"] == "production"
+    assert response.data["deploy_date"] == "2026-06-03"
+    assert response.data["features_preview"] == [
+        "priority-filter-v2",
+        "real-time-ticket-notifications",
+    ]
+    assert "timestamp" in response.data
+
+
+@pytest.mark.django_db
 def test_crear_solicitante_modelo():
     solicitante = Solicitante.objects.create(
         nombre="Juan",

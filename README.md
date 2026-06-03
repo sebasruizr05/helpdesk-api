@@ -85,7 +85,7 @@ GET http://<INGRESS_IP>/health/
   "version": "2.0.0",
   "app": "helpdesk-api",
   "environment": "production",
-  "timestamp": "2026-06-02T12:00:00.000000+00:00"
+  "timestamp": "2026-06-03T12:00:00.000000+00:00"
 }
 ```
 
@@ -96,8 +96,8 @@ GET http://<INGRESS_IP>/health/
   "version": "2.1.0",
   "app": "helpdesk-api",
   "environment": "production",
-  "timestamp": "2026-06-02T12:00:00.000000+00:00",
-  "deploy_date": "2026-06-02",
+  "timestamp": "2026-06-03T12:00:00.000000+00:00",
+  "deploy_date": "2026-06-03",
   "features_preview": ["priority-filter-v2", "real-time-ticket-notifications"]
 }
 ```
@@ -163,5 +163,5 @@ labels."k8s-pod/track"="canary"
 |---|---|---|
 | `DEPLOY_TYPE` | `stable` | `canary` |
 | `APP_VERSION` | `2.0.0` | `2.1.0` |
-| `DEPLOY_DATE` | — | `2026-06-02` |
+| `DEPLOY_DATE` | — | `2026-06-03` |
 | `ENVIRONMENT` | `production` | `production` |

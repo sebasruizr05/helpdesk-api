@@ -36,7 +36,7 @@ spec:
             - name: APP_VERSION
               value: "2.1.0"
             - name: DEPLOY_DATE
-              value: "2026-06-02"
+              value: "2026-06-03"
             - name: ENVIRONMENT
               value: "production"
             - name: PYTHONUNBUFFERED
