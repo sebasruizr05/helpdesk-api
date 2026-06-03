@@ -1,24 +1,13 @@
 steps:
-  # Paso 1: Construir imagen Docker
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build'
     args:
       - 'build'
       - '-t'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/helpdesk-repo/helpdesk-api:$SHORT_SHA'
-      - '-t'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/helpdesk-repo/helpdesk-api:latest'
       - '-t'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/helpdesk-repo/helpdesk-api:stable'
       - '.'
-
-  # Paso 2: Push a Artifact Registry (todas las etiquetas)
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'push-sha'
-    args:
-      - 'push'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/helpdesk-repo/helpdesk-api:$SHORT_SHA'
-    waitFor: ['build']
 
   - name: 'gcr.io/cloud-builders/docker'
     id: 'push-latest'
@@ -34,7 +23,6 @@ steps:
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/helpdesk-repo/helpdesk-api:stable'
     waitFor: ['build']
 
-  # Paso 3: Reemplazar PROJECT_ID en los manifests de k8s
   - name: 'ubuntu'
     id: 'patch-image'
     entrypoint: 'bash'
@@ -42,31 +30,27 @@ steps:
       - '-c'
       - |
         sed -i "s/PROJECT_ID/$PROJECT_ID/g" k8s/stable-deployment.yaml k8s/canary-deployment.yaml
-        sed -i "s|:latest|:$SHORT_SHA|g" k8s/stable-deployment.yaml k8s/canary-deployment.yaml
-    waitFor: ['push-sha']
+    waitFor: ['push-latest']
 
-  # Paso 4: Desplegar a GKE (aplica todos los manifests en k8s/)
   - name: 'gcr.io/cloud-builders/kubectl'
     id: 'deploy'
+    entrypoint: 'bash'
     args:
-      - 'apply'
-      - '-f'
-      - 'k8s/'
+      - '-c'
+      - |
+        gcloud container clusters get-credentials helpdesk-cluster --zone=us-central1-a --project=$PROJECT_ID
+        kubectl apply -f k8s/namespace.yaml
+        kubectl apply -f k8s/
     env:
-      - 'CLOUDSDK_COMPUTE_REGION=us-central1'
+      - 'CLOUDSDK_COMPUTE_ZONE=us-central1-a'
       - 'CLOUDSDK_CONTAINER_CLUSTER=helpdesk-cluster'
     waitFor: ['patch-image']
-
-substitutions:
-  _REGION: 'us-central1'
-  _SERVICE_NAME: 'helpdesk-api'
 
 options:
   machineType: 'N1_HIGHCPU_8'
   logging: CLOUD_LOGGING_ONLY
 
 images:
-  - 'us-central1-docker.pkg.dev/$PROJECT_ID/helpdesk-repo/helpdesk-api:$SHORT_SHA'
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/helpdesk-repo/helpdesk-api:latest'
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/helpdesk-repo/helpdesk-api:stable'
 

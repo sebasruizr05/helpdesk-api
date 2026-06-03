@@ -26,8 +26,8 @@ spec:
     spec:
       containers:
         - name: helpdesk-api
-          # Reemplazar PROJECT_ID con el ID real del proyecto GCP
-          image: us-central1-docker.pkg.dev/PROJECT_ID/helpdesk-repo/helpdesk-api:latest
+          # Reemplazar helpdesk-api-492703 con el ID real del proyecto GCP
+          image: us-central1-docker.pkg.dev/helpdesk-api-492703/helpdesk-repo/helpdesk-api:latest
           ports:
             - containerPort: 8000
           env:
@@ -36,11 +36,48 @@ spec:
             - name: APP_VERSION
               value: "2.1.0"
             - name: DEPLOY_DATE
-              value: "2026-06-02"
+              value: "2026-06-03"
             - name: ENVIRONMENT
               value: "production"
             - name: PYTHONUNBUFFERED
               value: "1"
+            - name: DEBUG
+              value: "False"
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: helpdesk-secrets
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: helpdesk-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: helpdesk-secrets
+                  key: DB_PASSWORD
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: helpdesk-secrets
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: helpdesk-secrets
+                  key: DB_PORT
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: helpdesk-secrets
+                  key: SECRET_KEY
+            - name: ALLOWED_HOSTS
+              valueFrom:
+                secretKeyRef:
+                  name: helpdesk-secrets
+                  key: ALLOWED_HOSTS
           livenessProbe:
             httpGet:
               path: /health/
@@ -57,7 +94,7 @@ spec:
           resources:
             requests:
               memory: "128Mi"
-              cpu: "100m"
+              cpu: "50m"
             limits:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "500m"
