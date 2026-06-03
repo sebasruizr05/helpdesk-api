@@ -376,8 +376,12 @@ class HealthCheckView(APIView):
     authentication_classes = []
 
     def get(self, request):
-        deploy_type = os.getenv("DEPLOY_TYPE", "stable")
-        version = os.getenv("APP_VERSION", "2.0.0")
+        deploy_type = os.getenv("DEPLOY_TYPE", "stable").strip().lower()
+        if deploy_type not in {"stable", "canary"}:
+            deploy_type = "stable"
+
+        default_version = "2.1.0" if deploy_type == "canary" else "2.0.0"
+        version = os.getenv("APP_VERSION", default_version)
 
         data = {
             "status": deploy_type,
