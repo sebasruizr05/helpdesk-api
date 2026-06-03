@@ -46,8 +46,8 @@ module "stack" {
   environment         = "dev"
   region              = var.region
   zone                = var.zone
-  resource_prefix     = "helpdesk-dev-2"
-  storage_bucket_name = "${var.project_id}-helpdesk-dev2-artifacts"
+  resource_prefix     = "helpdesk-dev-3"
+  storage_bucket_name = "${var.project_id}-helpdesk-dev3-artifacts"
   ssh_public_key      = var.ssh_public_key
   db_password         = var.db_password
   labels = {
