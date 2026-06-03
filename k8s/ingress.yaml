@@ -1,0 +1,24 @@
+# Ingress que expone el servicio común al exterior.
+# Todo el tráfico entra por aquí y llega al helpdesk-service,
+# que distribuye entre pods stable (75%) y canary (25%) según réplicas.
+# Requiere el controlador nginx-ingress instalado en el cluster:
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: helpdesk-ingress
+  namespace: helpdesk
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: helpdesk-service
+                port:
+                  number: 80

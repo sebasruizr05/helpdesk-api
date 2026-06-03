@@ -1,0 +1,63 @@
+# Deployment canary - recibe ~25% del tráfico (1 de 4 réplicas totales).
+# Misma imagen pero con DEPLOY_TYPE=canary y APP_VERSION=2.1.0.
+# El endpoint /health/ devuelve "status": "canary" y campos adicionales
+# (deploy_date, features_preview) para distinguirlo del stable.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helpdesk-canary
+  namespace: helpdesk
+  labels:
+    app: helpdesk-api
+    track: canary
+    version: "2.1.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: helpdesk-api
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: helpdesk-api
+        track: canary
+        version: "2.1.0"
+    spec:
+      containers:
+        - name: helpdesk-api
+          # Reemplazar PROJECT_ID con el ID real del proyecto GCP
+          image: us-central1-docker.pkg.dev/PROJECT_ID/helpdesk-repo/helpdesk-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DEPLOY_TYPE
+              value: "canary"
+            - name: APP_VERSION
+              value: "2.1.0"
+            - name: DEPLOY_DATE
+              value: "2026-06-02"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"

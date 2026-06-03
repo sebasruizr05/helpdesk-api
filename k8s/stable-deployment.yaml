@@ -1,0 +1,60 @@
+# Deployment estable - recibe ~75% del tráfico (3 de 4 réplicas totales).
+# Ambos deployments comparten el label app: helpdesk-api, que es el selector
+# del Service común. La distribución de tráfico es proporcional a las réplicas.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helpdesk-stable
+  namespace: helpdesk
+  labels:
+    app: helpdesk-api
+    track: stable
+    version: "2.0.0"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: helpdesk-api
+      track: stable
+  template:
+    metadata:
+      labels:
+        app: helpdesk-api
+        track: stable
+        version: "2.0.0"
+    spec:
+      containers:
+        - name: helpdesk-api
+          # Reemplazar PROJECT_ID con el ID real del proyecto GCP
+          image: us-central1-docker.pkg.dev/PROJECT_ID/helpdesk-repo/helpdesk-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DEPLOY_TYPE
+              value: "stable"
+            - name: APP_VERSION
+              value: "2.0.0"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
