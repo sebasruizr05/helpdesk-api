@@ -371,6 +371,32 @@ def _persist_normalized_payload(normalized):
     )
 
 
+class HealthCheckView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def get(self, request):
+        deploy_type = os.getenv("DEPLOY_TYPE", "stable")
+        version = os.getenv("APP_VERSION", "2.0.0")
+
+        data = {
+            "status": deploy_type,
+            "version": version,
+            "app": "helpdesk-api",
+            "environment": os.getenv("ENVIRONMENT", "development"),
+            "timestamp": timezone.now().isoformat(),
+        }
+
+        if deploy_type == "canary":
+            data["deploy_date"] = os.getenv("DEPLOY_DATE", timezone.now().date().isoformat())
+            data["features_preview"] = [
+                "priority-filter-v2",
+                "real-time-ticket-notifications",
+            ]
+
+        return Response(data)
+
+
 class IntegracionIngresoAPIView(APIView):
     # Endpoint flexible para recibir JSON desde otra nube sin contrato rígido.
     # Si no se puede normalizar a ticket, igual registra el payload y responde 202.
