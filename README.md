@@ -2,20 +2,28 @@
 
 API REST para mesa de ayuda (solicitante, ticket, comentario) usando Django + DRF.
 
+> **Versión stable:** `2.0.0` | **Versión canary:** `2.1.0`  
+> **Cluster:** `helpdesk-cluster` — GKE `us-central1-a`  
+> **IP pública:** `http://136.114.90.59`
+
 ---
 
-## Despliegue Canary en Kubernetes
+## Diagrama de infraestructura
 
-### Estrategia de distribución de tráfico
+![Diagrama de infraestructura Canary Deployment](docs/diagrama_infraestructura.png)
+
+---
+
+## Estrategia de Canary Deployment
 
 Se usa una estrategia de **Canary Deployment basada en proporción de réplicas**:
 
-| Deployment | Réplicas | Tráfico aproximado | Versión | Health status |
+| Deployment | Réplicas | Tráfico aproximado | Versión | Status |
 |---|---|---|---|---|
 | `helpdesk-stable` | 2 | ~67% | 2.0.0 | `stable` |
 | `helpdesk-canary` | 1 | ~33% | 2.1.0 | `canary` |
 
-**Cómo funciona:**
+### Cómo funciona
 
 1. Ambos Deployments comparten el label `app: helpdesk-api`.
 2. El **Service común** (`helpdesk-service`) selecciona todos los pods con ese label, balanceando el tráfico entre los 3 pods en total.
@@ -23,14 +31,18 @@ Se usa una estrategia de **Canary Deployment basada en proporción de réplicas*
 4. La distribución 67/33 emerge naturalmente de la relación 2:1 de réplicas — sin configuración adicional de pesos ni reglas de enrutamiento.
 5. Cada pod responde con su propia versión según la variable de entorno `DEPLOY_TYPE` configurada en su Deployment.
 
+### Flujo de tráfico
+
 ```
 Internet
     │
     ▼
-[ Ingress - IP: 136.114.90.59 ]
-    │
+[ Ingress — 136.114.90.59:80 ]
+    │  Recibe requests externos y reenvía al Service
     ▼
-[ helpdesk-service ] ──── selector: app=helpdesk-api
+[ helpdesk-service — ClusterIP ]
+    │  selector: app=helpdesk-api
+    │  Balancea entre todos los pods disponibles
     │
     ├── Pod stable-1  (DEPLOY_TYPE=stable, v2.0.0)  ┐
     ├── Pod stable-2  (DEPLOY_TYPE=stable, v2.0.0)  ├ ~67% del tráfico
@@ -38,7 +50,19 @@ Internet
     └── Pod canary-1  (DEPLOY_TYPE=canary, v2.1.0)    ~33% del tráfico
 ```
 
-### Archivos Kubernetes
+### Control de tráfico mediante Ingress
+
+El Ingress actúa como punto de entrada único — recibe el tráfico y lo pasa al Service sin configurar pesos. Es el **Service** quien distribuye el tráfico proporcionalmente al número de réplicas. Esta estrategia se llama **replica-based canary deployment**.
+
+Si se quisiera control exacto de porcentaje independiente de réplicas, se usarían anotaciones nginx:
+```yaml
+nginx.ingress.kubernetes.io/canary: "true"
+nginx.ingress.kubernetes.io/canary-weight: "10"
+```
+
+---
+
+## Archivos Kubernetes
 
 ```
 k8s/
@@ -51,23 +75,38 @@ k8s/
 
 ---
 
-## URLs para validar ambos despliegues (Postman / curl)
+## Pipeline CI/CD — Cloud Build
 
-La IP pública del Ingress es `136.114.90.59`.
+El archivo `cloudbuild.yaml` ejecuta automáticamente:
 
-Para obtenerla en cualquier momento:
+1. **Build** — construye la imagen Docker
+2. **Push** — sube la imagen a Artifact Registry con etiquetas `latest` y `stable`
+3. **Patch** — reemplaza `PROJECT_ID` en los manifests de k8s
+4. **Deploy** — aplica todos los manifests al cluster `helpdesk-cluster`
+
 ```bash
-kubectl get ingress -n helpdesk
+# Ejecutar manualmente
+gcloud builds submit --config=cloudbuild.yaml --project=helpdesk-api-492703 .
 ```
 
 ---
 
+## Versiones
+
+| Tag | Versión | Descripción |
+|---|---|---|
+| `v2.0.0` | stable | Versión base con endpoint `/health/` |
+| `v2.1.0` | canary | Agrega `deploy_date`, `features_preview` y mejoras de validación |
+
+---
+
+## URLs para validar ambos despliegues
+
 ### Health Check — detecta stable o canary
 
-**Método:** `GET`
-**URL:** `http://136.114.90.59/health/`
+**`GET http://136.114.90.59/health/`**
 
-Ejecutar varias veces para observar la distribución. Aproximadamente 1 de cada 3 requests llegará al pod canary.
+Ejecutar varias veces para observar la distribución de tráfico.
 
 **Respuesta stable** (~67% de las veces):
 ```json
@@ -93,13 +132,11 @@ Ejecutar varias veces para observar la distribución. Aproximadamente 1 de cada 
 }
 ```
 
----
-
 ### Endpoints funcionales
 
 | Método | URL | Descripción |
 |---|---|---|
-| GET | `http://136.114.90.59/health/` | Health check — muestra si el pod es stable o canary |
+| GET | `http://136.114.90.59/health/` | Health check — stable o canary |
 | GET | `http://136.114.90.59/api/v2/tickets/` | Listar tickets |
 | POST | `http://136.114.90.59/api/v2/tickets/` | Crear ticket |
 | GET | `http://136.114.90.59/api/v2/solicitantes/` | Listar solicitantes |
@@ -109,7 +146,7 @@ Ejecutar varias veces para observar la distribución. Aproximadamente 1 de cada 
 
 ## Monitoreo de la estrategia canary
 
-### 1. Ver distribución de tráfico en tiempo real (curl)
+### 1. Distribución de tráfico en tiempo real
 
 ```bash
 for i in $(seq 1 15); do
@@ -119,49 +156,38 @@ done
 
 Resultado esperado: ~10 respuestas `stable 2.0.0` y ~5 respuestas `canary 2.1.0`.
 
----
-
-### 2. Ver estado de los pods en tiempo real (kubectl)
+### 2. Estado de pods en tiempo real
 
 ```bash
-# Listar pods con track (stable/canary) y versión
+# Listar pods con track y versión
 kubectl get pods -n helpdesk -L track,version
 
-# Ver logs en vivo del pod canary
+# Logs en vivo del pod canary
 kubectl logs -n helpdesk -l track=canary -f
 
-# Ver logs en vivo de los pods stable
+# Logs en vivo de los pods stable
 kubectl logs -n helpdesk -l track=stable -f
 ```
 
----
-
 ### 3. Consola GCP — Kubernetes Engine
 
-URL directa al cluster en GCP Console:
 ```
 https://console.cloud.google.com/kubernetes/workload/overview?project=helpdesk-api-492703
 ```
 
-Desde ahí se puede ver:
 - **Workloads** → `helpdesk-stable` (2 pods) y `helpdesk-canary` (1 pod)
 - **Services & Ingress** → IP pública `136.114.90.59`
-- **Pods** → estado individual de cada pod con su label `track`
 
----
+### 4. Cloud Logging — filtros por versión
 
-### 4. Cloud Logging — filtrar por versión
-
-En GCP Console → **Cloud Logging**, usar estos filtros:
-
-**Solo logs del pod canary:**
+**Solo logs canary:**
 ```
 resource.type="k8s_container"
 resource.labels.namespace_name="helpdesk"
 labels."k8s-pod/track"="canary"
 ```
 
-**Solo logs de los pods stable:**
+**Solo logs stable:**
 ```
 resource.type="k8s_container"
 resource.labels.namespace_name="helpdesk"
@@ -170,7 +196,7 @@ labels."k8s-pod/track"="stable"
 
 ---
 
-## Variables de entorno relevantes
+## Variables de entorno
 
 | Variable | Stable | Canary |
 |---|---|---|
